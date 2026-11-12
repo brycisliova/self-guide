@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tide</title>
+<meta name="description" content="A daily rhythm you can reshape: schedule, tasks, journal, breathing and a calm kit.">
+<meta name="theme-color" content="#0d3b4a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tide">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main id="view" class="wrap" aria-live="polite"></main>
+
+<button id="waveBtn" class="wave-fab" data-act="wave" aria-label="A wave hit. Open the calm steps.">
+  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M2 14c2.5 0 2.5-3 5-3s2.5 3 5 3 2.5-3 5-3 2.5 3 5 3M2 19c2.5 0 2.5-3 5-3s2.5 3 5 3 2.5-3 5-3 2.5 3 5 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  <span>Wave hit</span>
+</button>
+
+<nav class="tabs" aria-label="Sections">
+  <button data-tab="today">Today</button>
+  <button data-tab="plan">Plan</button>
+  <button data-tab="journal">Journal</button>
+  <button data-tab="calm">Calm</button>
+  <button data-tab="more">More</button>
+</nav>
+
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-bg" data-act="close-sheet"></div>
+  <div class="sheet-card" role="dialog" aria-modal="true"><div id="sheetBody"></div></div>
+</div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
