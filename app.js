@@ -67,15 +67,18 @@ const CONSUME = {
   no: ['Any feed after wind-down starts', 'Breakup, revenge and "signs they miss you" content', 'Sad playlists on loop', 'Their profile, status, stories and old photos', 'Old chats and screenshots', 'Anything that starts with "just checking"']
 };
 
+const CREDITS = [["Morning", "A Misty Dawn, Dandenong Ranges", "Uzman Naleer", "CC BY-SA 4.0", "https://commons.wikimedia.org/wiki/File:A_Misty_Dawn,_Dandenong_Ranges.jpg"], ["Midday", "Caribbean Sea - Long Exposure", "Martin Falbisoner", "CC BY-SA 4.0", "https://commons.wikimedia.org/wiki/File:Caribbean_Sea_-_Long_Exposure.jpg"], ["Evening", "Chimney Rock Trail Point Reyes December 2016 panorama 2", "King of Hearts", "CC BY-SA 4.0", "https://commons.wikimedia.org/wiki/File:Chimney_Rock_Trail_Point_Reyes_December_2016_panorama_2.jpg"], ["Night", "Linnutee - Milky Way (9) copy", "Kristian Pikner", "CC BY-SA 4.0", "https://commons.wikimedia.org/wiki/File:Linnutee_-_Milky_Way_(9)_copy.jpg"], ["Journal", "Hommikune udu Kakerdaja rabas", "Abrget47j", "CC BY-SA 3.0", "https://commons.wikimedia.org/wiki/File:Hommikune_udu_Kakerdaja_rabas.jpg"], ["Calm", "Lake Seliger. Ostashkov. View of Voroniy Island", "Александр Байдуков", "CC BY-SA 4.0", "https://commons.wikimedia.org/wiki/File:Lake_Seliger._Ostashkov._View_of_Voroniy_Island.jpg"], ["Plan", "The Pinnacle, Grampians National Park Sunrise", "Joshua Tagicakibau", "CC BY-SA 4.0", "https://commons.wikimedia.org/wiki/File:The_Pinnacle,_Grampians_National_Park_Sunrise.jpg"], ["More", "Dülmen, Kirchspiel, Börnste, Feld -- 2017 -- 3171", "Dietmar Rabich", "CC BY-SA 4.0", "https://commons.wikimedia.org/wiki/File:D%C3%BClmen,_Kirchspiel,_B%C3%B6rnste,_Feld_--_2017_--_3171.jpg"], ["Wave", "Santorin (GR), Exomytis, Vlychada Beach -- 2017 -- 2999 (bw)", "Dietmar Rabich", "CC BY-SA 4.0", "https://commons.wikimedia.org/wiki/File:Santorin_(GR),_Exomytis,_Vlychada_Beach_--_2017_--_2999_(bw).jpg"]];
+
 // ---------- state ----------
 const KEY = 'tide.v1', SYNC_KEY = 'tide.sync';
 const blank = () => ({
   v: 1, updatedAt: 0,
   settings: { wake: '08:00', bed: '00:30', dayType: 'weekday', work: 3, inc: { move: true, nap: true, friends: true, journal: true, meditate: true, detox: true }, notify: false, theme: 'auto' },
   template: null, days: {}, tasks: [], journal: [], waves: [], quotes: [], notes: {},
-  nc: { start: null, best: 0, resets: 0 }
+  nc: { start: null, best: 0, resets: 0 },
+  g: { clientId: '', connected: false, calId: '', listId: '', last: 0, delTasks: [] }
 });
-function migrate(s) { const b = blank(); const out = Object.assign(b, s); out.settings = Object.assign(blank().settings, s.settings || {}); out.settings.inc = Object.assign(blank().settings.inc, (s.settings || {}).inc || {}); out.nc = Object.assign(blank().nc, s.nc || {}); return out; }
+function migrate(s) { const b = blank(); const out = Object.assign(b, s); out.settings = Object.assign(blank().settings, s.settings || {}); out.settings.inc = Object.assign(blank().settings.inc, (s.settings || {}).inc || {}); out.nc = Object.assign(blank().nc, s.nc || {}); out.g = Object.assign(blank().g, s.g || {}); return out; }
 let state = blank();
 try { const raw = localStorage.getItem(KEY); if (raw) state = migrate(JSON.parse(raw)); } catch (e) { /* start fresh */ }
 let sync = { token: '', gistId: '', last: 0, status: '' };
@@ -83,8 +86,12 @@ try { Object.assign(sync, JSON.parse(localStorage.getItem(SYNC_KEY) || '{}')); }
 const ui = { tab: 'today', open: null, dayOffset: 0, prompt: 0, pattern: '4-8', jmood: 0, libOpen: null };
 
 function persist() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { toast('Could not save on this device. Storage is full or blocked.'); } }
-let pushTimer = null;
-function save() { state.updatedAt = Date.now(); persist(); if (sync.token) { clearTimeout(pushTimer); pushTimer = setTimeout(() => syncNow(true), 4000); } }
+let pushTimer = null, gTimer = null;
+function save(noG) {
+  state.updatedAt = Date.now(); persist();
+  if (sync.token) { clearTimeout(pushTimer); pushTimer = setTimeout(() => syncNow(true), 4000); }
+  if (!noG && state.g.connected && gOK()) { clearTimeout(gTimer); gTimer = setTimeout(() => gSync(false), 5000); }
+}
 function saveSync() { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) { /* ignore */ } }
 
 // ---------- time model ----------
@@ -207,10 +214,15 @@ function tideSvg(key) {
   return '<svg viewBox="-8 0 ' + (W + 16) + ' ' + H + '" role="img" aria-label="Your day from wake to lights-out"><path d="' + d + '" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="2.5" stroke-linecap="round"/>' + dot + '</svg>';
 }
 
+function heroImg(key) { const now = logicalNow(); if (key !== now.key) return 'dawn'; const { b } = span(); return now.min < 11 * 60 ? 'dawn' : now.min < 17 * 60 ? 'day' : now.min < b - 120 ? 'dusk' : 'night'; }
+function hero(img, eyebrow, title, sub, extra, cls) {
+  return '<header class="hero ' + (cls || 'sub') + '" style="--img:url(img/' + img + '.webp)"><div class="hero-img"></div><div class="hero-top"><span class="mark">Tide</span>' + (extra && extra.top || '') + '</div><div class="hero-main"><div class="eyebrow">' + eyebrow + '</div><h1>' + title + '</h1>' + (sub ? '<p>' + sub + '</p>' : '') + '</div>' + (extra && extra.bottom || '') + '</header>';
+}
 function blockHtml(b, now, isToday) {
   const isNow = isToday && b.dur && now.min >= b.start && now.min < b.start + b.dur, open = ui.open === b.id;
-  return '<li class="blk cat-' + b.cat + (b.done ? ' done' : '') + (isNow ? ' now' : '') + '">' +
-    '<div class="when"><b>' + fmt(b.start) + '</b>' + (b.dur ? dur(b.dur) : '') + '</div>' +
+  const past = isToday ? b.start + b.dur <= now.min && b.dur > 0 : false;
+  return '<li class="blk cat-' + b.cat + (b.done ? ' done' : '') + (isNow ? ' now' : '') + (past ? ' past' : '') + '">' +
+    '<div class="when">' + fmt(b.start) + '<span>' + (b.dur ? dur(b.dur) : '') + '</span></div>' +
     '<button class="body" data-act="open" data-id="' + b.id + '" aria-expanded="' + open + '"><div class="cat">' + CATS[b.cat] + (isNow ? ' · now' : '') + '</div><div class="ttl">' + esc(b.title) + '</div>' + (b.note && (open || isNow) ? '<div class="note">' + esc(b.note) + '</div>' : '') + '</button>' +
     '<button class="chk" data-act="done" data-id="' + b.id + '" aria-label="' + (b.done ? 'Mark not done' : 'Mark done') + '"><i>' + (b.done ? '✓' : '') + '</i></button>' +
     (open ? '<div class="acts">' + [['swap', 'Swap'], ['edit', 'Edit'], ['earlier', '−15 min'], ['later', '+15 min'], ['cal', 'Add to calendar'], ['del', 'Remove']].map(a => '<button class="btn sm' + (a[0] === 'del' ? ' danger' : '') + '" data-act="' + a[0] + '" data-id="' + b.id + '">' + a[1] + '</button>').join('') + '</div>' : '') + '</li>';
@@ -222,14 +234,18 @@ function renderToday() {
   const cur = isToday && d.blocks.find(b => b.dur && now.min >= b.start && now.min < b.start + b.dur);
   const nxt = isToday && d.blocks.find(b => b.start > now.min);
   const doneN = d.blocks.filter(b => b.done).length;
-  const line = !isToday ? d.blocks.length + ' blocks planned' : cur ? 'Now: ' + esc(cur.title) + (nxt ? ' · then ' + esc(nxt.title) + ' at ' + fmt(nxt.start) : '') : nxt ? 'Next: ' + esc(nxt.title) + ' at ' + fmt(nxt.start) : 'Day is done. Rest.';
   const { w, b } = span();
   const tasks = state.tasks.filter(t => !t.done || t.doneDay === now.key);
-  return '<header class="tide"><div class="row between"><div><div class="eyebrow">' + (ui.dayOffset === 0 ? 'Today' : ui.dayOffset === 1 ? 'Tomorrow' : ui.dayOffset === -1 ? 'Yesterday' : 'Day view') + '</div><h1>' + esc(date) + '</h1></div>' +
-    '<div class="daynav"><button data-act="day" data-n="-1" aria-label="Previous day">‹</button>' + (ui.dayOffset ? '<button data-act="day" data-n="0" aria-label="Back to today">•</button>' : '') + '<button data-act="day" data-n="1" aria-label="Next day">›</button></div></div>' +
-    tideSvg(key) + '<div class="ends"><span>Wake ' + fmt(w) + '</span><span>' + doneN + ' of ' + d.blocks.length + ' done</span><span>Lights out ' + fmt(b) + '</span></div><p class="next">' + line + '</p></header>' +
+  const short = keyDate(key).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  const label = ui.dayOffset === 1 ? 'Tomorrow' : ui.dayOffset === -1 ? 'Yesterday' : 'Day view';
+  const eyebrow = !isToday ? label + ' · ' + d.blocks.length + ' blocks' : cur ? 'Now · until ' + fmt(cur.start + cur.dur) : nxt ? 'Next · ' + fmt(nxt.start) : 'Day complete';
+  const title = !isToday ? esc(date) : cur ? esc(cur.title) : nxt ? esc(nxt.title) : '<em>Rest.</em>';
+  const sub = !isToday ? '' : cur && nxt ? 'Then ' + esc(nxt.title.charAt(0).toLowerCase() + nxt.title.slice(1)) + ' at ' + fmt(nxt.start) + '.' : !cur && !nxt ? 'Nothing left to do today. Phone across the room.' : '';
+  const gl = state.g.connected ? '<div class="gline"><span>Google · ' + esc(G.status || (state.g.last ? 'synced ' + new Date(state.g.last).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : 'not synced yet')) + '</span><button class="btn sm" data-act="g-sync">Sync now</button></div>' : '';
+  return hero(heroImg(key), eyebrow, title, sub, { top: '<div class="daynav"><button data-act="day" data-n="-1" aria-label="Previous day">‹</button><button data-act="day" data-n="0" aria-label="Back to today">' + esc(short) + '</button><button data-act="day" data-n="1" aria-label="Next day">›</button></div>',
+    bottom: '<div class="hero-tide">' + tideSvg(key) + '<div class="ends"><span>Wake ' + fmt(w) + '</span><span>' + doneN + ' / ' + d.blocks.length + ' done</span><span>Lights out ' + fmt(b) + '</span></div></div>' }, 'full') + '<!--b-->' + gl +
     '<section class="stack"><div class="eyebrow">How is today, honestly?</div><div class="moods">' + ['Heavy', 'Low', 'Okay', 'Good', 'Light'].map((m, i) => '<button data-act="mood" data-n="' + (i + 1) + '" class="' + (d.mood === i + 1 ? 'on' : '') + '">' + m + '</button>').join('') + '</div></section>' +
-    '<section class="stack"><div class="row between"><h2>Schedule</h2><div class="row"><button class="btn sm" data-act="add-block">Add block</button><button class="btn sm" data-act="day-menu">Calendar and share</button></div></div>' +
+    '<section class="stack"><div class="row between"><h2>The day</h2><div class="row"><button class="btn sm" data-act="add-block">Add block</button><button class="btn sm" data-act="day-menu">Calendar and share</button></div></div>' +
     '<ul class="blocks">' + d.blocks.map(x => blockHtml(x, now, isToday)).join('') + '</ul></section>' +
     '<section class="card"><h2>Tasks</h2><form class="addrow" data-form="task"><input type="text" id="taskIn" placeholder="Add a task" autocomplete="off"><button class="btn primary">Add</button></form>' +
     (tasks.length ? '<ul class="list">' + tasks.map(t => '<li><input type="checkbox" data-act="task" data-id="' + t.id + '"' + (t.done ? ' checked' : '') + ' aria-label="Done"><span class="txt' + (t.done ? ' done' : '') + '">' + esc(t.text) + '</span><button class="x" data-act="task-del" data-id="' + t.id + '" aria-label="Delete task">×</button></li>').join('') + '</ul>' : '<p class="muted small">Nothing open. Add what would make today enough, three at most.</p>') + '</section>';
@@ -238,7 +254,7 @@ function renderToday() {
 function renderPlan() {
   const s = state.settings;
   const tog = (k, label) => '<label class="tog"><input type="checkbox" data-set="inc.' + k + '"' + (s.inc[k] ? ' checked' : '') + '> ' + label + '</label>';
-  return '<header><div class="eyebrow">Plan</div><h1>Shape your day</h1></header>' +
+  return hero('plan', 'Plan', 'Shape your <em>day</em>', 'Fix the two ends, wake and lights out. Everything between can move.') + '<!--b-->' +
     '<section class="card"><h2>Sleep anchors</h2><div class="grid2"><label class="f">Wake<input type="time" id="setWake" data-set="wake" value="' + s.wake + '"></label><label class="f">Lights out<input type="time" id="setBed" data-set="bed" value="' + s.bed + '"></label></div>' +
     '<div class="row">' + ['00:00', '00:30', '01:00'].map(t => '<button class="chip' + (s.bed === t ? ' on' : '') + '" data-act="bed" data-v="' + t + '">' + fmt(toMin(t)) + '</button>').join('') + '</div><p class="small muted">Wind-down starts two hours before lights out, at ' + fmt(span().b - 120) + '. Feeds go off then.</p></section>' +
     '<section class="card"><h2>Day type</h2><div class="row">' + Object.entries(DAY_TYPES).map(([k, t]) => '<button class="chip' + (s.dayType === k ? ' on' : '') + '" data-act="daytype" data-v="' + k + '">' + t.name + '</button>').join('') + '</div><p class="small muted">' + DAY_TYPES[s.dayType].hint + '</p>' +
@@ -253,7 +269,7 @@ function renderJournal() {
   const p = PROMPTS[ui.prompt], now = logicalNow();
   const last14 = []; for (let i = 13; i >= 0; i--) { const d = state.days[addDays(now.key, -i)]; last14.push(d ? d.mood : 0); }
   const weekAgo = Date.now() - 7 * 864e5, moods = last14.slice(7).filter(Boolean);
-  return '<header><div class="eyebrow">Journal</div><h1>Write it out</h1></header>' +
+  return hero('journal', 'Journal', 'Write it <em>out</em>', 'On the page it stops circling.') + '<!--b-->' +
     '<section class="card"><div class="row">' + PROMPTS.map((x, i) => '<button class="chip' + (ui.prompt === i ? ' on' : '') + '" data-act="prompt" data-n="' + i + '">' + x[0] + '</button>').join('') + '</div>' +
     '<textarea id="jText" placeholder="Start anywhere.">' + esc(draft() || p[1]) + '</textarea>' +
     '<div class="row between"><div class="row"><span class="small muted">Mood</span>' + [1, 2, 3, 4, 5].map(n => '<button class="chip' + (ui.jmood === n ? ' on' : '') + '" data-act="jmood" data-n="' + n + '">' + n + '</button>').join('') + '</div><div class="row">' + (window.SpeechRecognition || window.webkitSpeechRecognition ? '<button class="btn sm" data-act="dictate">Dictate</button>' : '') + '<button class="btn primary" data-act="jsave">Save entry</button></div></div></section>' +
@@ -279,7 +295,7 @@ function tickUrge() { const el = $('#urge'); if (!el) return clearInterval(urgeT
 
 function renderCalm() {
   const weekAgo = Date.now() - 7 * 864e5;
-  return '<header><div class="eyebrow">Calm</div><h1>Come back to the body</h1></header>' +
+  return hero('calm', 'Calm', 'Back to the <em>body</em>', 'A wave peaks and passes in a few minutes if you do not feed it.') + '<!--b-->' +
     '<section class="card"><h2>Breathing pacer</h2><div class="row">' + Object.entries(PATTERNS).map(([k, p]) => '<button class="chip' + (ui.pattern === k ? ' on' : '') + '" data-act="pattern" data-v="' + k + '">' + p.name + '</button>').join('') + '</div><p class="small muted">' + PATTERNS[ui.pattern].hint + '</p>' + pacerHtml() + '</section>' +
     '<section class="card"><h2>Urge timer</h2><p class="small muted">Want to text, unblock, or check a profile? Start ten minutes and do one small task. Urges peak and fall on their own.</p><div class="timer" id="urge">10:00</div><div class="row"><button class="btn primary" data-act="urge">Start 10 minutes</button><button class="btn" data-act="urge-stop">Reset</button></div></section>' +
     '<section class="card"><h2>RAIN</h2><ol class="steps">' + LIBRARY[1].points.slice(0, 4).map(x => '<li>' + esc(x) + '</li>').join('') + '</ol></section>' +
@@ -291,23 +307,28 @@ function renderCalm() {
 function ncDays() { return state.nc.start ? Math.floor((Date.now() - state.nc.start) / 864e5) : 0; }
 function renderMore() {
   const today = getDay(logicalNow().key), n = ncDays();
-  return '<header><div class="eyebrow">More</div><h1>Tools and notes</h1></header>' +
+  return hero('more', 'More', 'Tools and <em>notes</em>', '') + '<!--b-->' +
     '<section class="card"><h2>No-contact tracker</h2>' + (state.nc.start ? '<div class="row between"><div><div class="big">' + n + '</div><span class="small muted">day' + (n === 1 ? '' : 's') + ' · goal 30 · best ' + Math.max(state.nc.best, n) + '</span></div><button class="btn sm danger" data-act="nc-reset">I made contact</button></div>' : '<p class="small muted">Thirty days with no messages, calls or checking. You do not announce it or explain it. Slipping is not failing, you restart the count.</p><button class="btn primary" data-act="nc-start">Start today</button>') +
     '<h3>Today</h3><ul class="list">' + NC_ITEMS.map(([k, label]) => '<li><input type="checkbox" id="nc-' + k + '" data-act="nc-check" data-id="' + k + '"' + (today.nc[k] ? ' checked' : '') + '><label class="txt" for="nc-' + k + '">' + label + '</label></li>').join('') + '</ul></section>' +
     '<section class="card"><h2>What to take in, what to skip</h2><h3>Take in</h3><ul class="plain">' + CONSUME.yes.map(x => '<li>' + x + '</li>').join('') + '</ul><h3>Skip</h3><ul class="plain">' + CONSUME.no.map(x => '<li>' + x + '</li>').join('') + '</ul></section>' +
     '<section class="card"><h2>Library</h2><p class="small muted">Key ideas in plain words, with room for your own takeaways.</p>' + LIBRARY.map(l => '<details' + (ui.libOpen === l.id ? ' open' : '') + ' data-lib="' + l.id + '"><summary>' + esc(l.title) + '</summary><div><ul class="plain">' + l.points.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' + (l.link ? '<a href="' + l.link + '" target="_blank" rel="noopener">' + esc(l.linkText) + '</a>' : '') + '<label class="f">My takeaways<textarea id="note-' + l.id + '" data-note="' + l.id + '" placeholder="What I want to remember and use">' + esc(state.notes[l.id] || '') + '</textarea></label></div></details>').join('') + '</section>' +
     '<section class="card"><h2>Quote notebook</h2><form class="stack" data-form="quote"><input type="text" id="quoteIn" placeholder="A line worth keeping" autocomplete="off"><div class="addrow"><input type="text" id="quoteSrc" placeholder="Who said it (optional)" autocomplete="off"><button class="btn primary">Keep</button></div></form>' +
-    (state.quotes.length ? '<ul class="list">' + state.quotes.slice().reverse().map(q => '<li><div class="txt">' + esc(q.text) + (q.src ? '\n<span class="small muted">' + esc(q.src) + '</span>' : '') + '</div><button class="x" data-act="quote-del" data-id="' + q.id + '" aria-label="Delete quote">×</button></li>').join('') + '</ul>' : '') + '</section>' +
+    (state.quotes.length ? '<ul class="list">' + state.quotes.slice().reverse().map(q => '<li><div class="txt"><span class="quote">' + esc(q.text) + '</span>' + (q.src ? '\n<span class="eyebrow">' + esc(q.src) + '</span>' : '') + '</div><button class="x" data-act="quote-del" data-id="' + q.id + '" aria-label="Delete quote">×</button></li>').join('') + '</ul>' : '') + '</section>' +
+    '<section class="card"><h2>Google Calendar and Tasks</h2><p class="small muted">Connect once and Tide keeps a calendar named Tide (today and tomorrow, with an alert at each block) and a task list named Tide in your Google account. Tasks sync both ways: tick one in Google Tasks and it is ticked here.</p>' +
+    (state.g.connected ? '<div class="row"><button class="btn primary" data-act="g-sync">Sync now</button><button class="btn danger" data-act="g-off">Disconnect</button></div>' : '<details><summary>One-time setup, about five minutes</summary><div><ol class="steps"><li>Open console.cloud.google.com and create a project.</li><li>APIs and Services → Library: enable <b>Google Calendar API</b> and <b>Google Tasks API</b>.</li><li>OAuth consent screen: choose External, fill in the app name and your email, and add your own Gmail address under Test users.</li><li>Credentials → Create credentials → OAuth client ID → Web application. Under Authorised JavaScript origins add <b>' + esc(location.origin) + '</b>.</li><li>Copy the client ID and paste it below.</li></ol></div></details><label class="f">Google client ID<input type="text" id="gClient" value="' + esc(state.g.clientId) + '" placeholder="…apps.googleusercontent.com" autocomplete="off"></label><div class="row"><button class="btn primary" data-act="g-connect">Connect Google</button></div>') +
+    '<p class="small muted" id="gStatus">' + esc(G.status || (state.g.connected ? (state.g.last ? 'Last synced ' + new Date(state.g.last).toLocaleString() : 'Connected.') + ' Google asks you to confirm again about once an hour; tap Sync now when it does.' : 'Not connected. Without it, use Calendar and share on the Today screen to add a day to any calendar.')) + '</p></section>' +
     '<section class="card"><h2>Sync across devices</h2><p class="small muted">Optional. Tide can keep a copy of your data in a secret GitHub gist on your own account and pull it on your other devices. Create a token at github.com → Settings → Developer settings → Fine-grained tokens with only the Gists permission (read and write), then paste it on each device. A secret gist is unlisted, but anyone who has its link can read it, so never share that link.</p>' +
     '<label class="f">GitHub token<input type="password" id="syncToken" value="' + esc(sync.token) + '" placeholder="github_pat_…" autocomplete="off"></label><div class="row"><button class="btn primary" data-act="sync-save">' + (sync.token ? 'Sync now' : 'Turn on sync') + '</button>' + (sync.token ? '<button class="btn danger" data-act="sync-off">Turn off on this device</button>' : '') + '</div><p class="small muted" id="syncStatus">' + esc(sync.status || (sync.last ? 'Last synced ' + new Date(sync.last).toLocaleString() : 'Not syncing. Data lives on this device only.')) + '</p></section>' +
     '<section class="card"><h2>Backup</h2><p class="small muted">Download everything as one file, or restore from a file.</p><div class="row"><button class="btn" data-act="export">Download backup</button><label class="btn">Restore from file<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>' +
     '<section class="card"><h2>Appearance</h2><div class="row">' + [['auto', 'Match phone'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => '<button class="chip' + (state.settings.theme === k ? ' on' : '') + '" data-act="theme" data-v="' + k + '">' + l + '</button>').join('') + '</div></section>' +
-    '<section class="card"><h2>When it is too heavy</h2><p>Tele-MANAS, India\'s free mental health line, answers day and night: <b>14416</b>.</p><p class="small muted">Your campus counselling or wellness centre is free and sees this often. If the sadness stays heavy for weeks, or you feel unsafe, talk to a person today. An app is not enough for that.</p></section>';
+    '<section class="card"><h2>When it is too heavy</h2><p>Tele-MANAS, India\'s free mental health line, answers day and night: <b>14416</b>.</p><p class="small muted">Your campus counselling or wellness centre is free and sees this often. If the sadness stays heavy for weeks, or you feel unsafe, talk to a person today. An app is not enough for that.</p></section>' +
+    '<section class="card"><h3>Photographs</h3><div class="credits">' + CREDITS.map(c => '<span>' + c[0] + ': <a href="' + esc(c[4]) + '" target="_blank" rel="noopener">' + esc(c[1]) + '</a> by ' + esc(c[2]) + ', ' + c[3] + ', cropped. Wikimedia Commons.</span>').join('') + '</div></section>';
 }
 
 function render() {
   const v = $('#view'); stopPacer();
-  v.innerHTML = { today: renderToday, plan: renderPlan, journal: renderJournal, calm: renderCalm, more: renderMore }[ui.tab]();
+  v.classList.toggle('enter', render.last !== ui.tab + ui.dayOffset); render.last = ui.tab + ui.dayOffset;
+  v.innerHTML = { today: renderToday, plan: renderPlan, journal: renderJournal, calm: renderCalm, more: renderMore }[ui.tab]().replace('<!--b-->', '<div class="wrap">') + '</div>';
   document.querySelectorAll('.tabs button').forEach(b => { b.classList.toggle('on', b.dataset.tab === ui.tab); b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'); });
   const th = state.settings.theme; if (th === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', th);
   if (ui.tab === 'calm' && urgeEnd) { tickUrge(); }
@@ -340,7 +361,7 @@ const WAVE = [
 ];
 function waveSheet(step) {
   WAVE.step = step; const last = step === WAVE.length - 1;
-  openSheet(WAVE[step]() + '<div class="row">' + (last ? '<button class="btn primary" data-act="wave-save">Save and close</button>' : '<button class="btn primary" data-act="wave-next">Next</button>') + '<button class="btn quiet" data-act="close-sheet">Close</button></div>');
+  openSheet('<div class="sheet-photo" style="--img:url(img/wave.webp)"></div>' + WAVE[step]() + '<div class="row">' + (last ? '<button class="btn primary" data-act="wave-save">Save and close</button>' : '<button class="btn primary" data-act="wave-next">Next</button>') + '<button class="btn quiet" data-act="close-sheet">Close</button></div>');
   if (step === 0) { ui.patternSaved = ui.pattern; ui.pattern = '4-8'; startPacer(); ui.pattern = ui.patternSaved; }
 }
 
@@ -366,8 +387,8 @@ const A = {
   'share-plan': () => navigator.share({ title: 'My plan', text: planText(viewKey()) }).catch(() => {}),
   day: (el) => { ui.dayOffset = +el.dataset.n === 0 ? 0 : ui.dayOffset + +el.dataset.n; ui.open = null; render(); },
   mood: (el) => { const d = getDay(viewKey()); d.mood = d.mood === +el.dataset.n ? 0 : +el.dataset.n; save(); render(); if (d.mood === 1) toast('Heavy days count too. Try the Gentle day type in Plan.'); },
-  task: (el) => { const t = state.tasks.find(x => x.id === el.dataset.id); t.done = !t.done; t.doneDay = t.done ? logicalNow().key : null; save(); render(); },
-  'task-del': (el) => { state.tasks = state.tasks.filter(x => x.id !== el.dataset.id); save(); render(); },
+  task: (el) => { const t = state.tasks.find(x => x.id === el.dataset.id); t.done = !t.done; t.doneDay = t.done ? logicalNow().key : null; t.u = Date.now(); save(); render(); },
+  'task-del': (el) => { const t = state.tasks.find(x => x.id === el.dataset.id); if (t && t.gid) state.g.delTasks.push(t.gid); state.tasks = state.tasks.filter(x => x.id !== el.dataset.id); save(); render(); },
   bed: (el) => { state.settings.bed = el.dataset.v; save(); render(); },
   daytype: (el) => { state.settings.dayType = el.dataset.v; save(); render(); },
   work: (el) => { state.settings.work = +el.dataset.v; save(); render(); },
@@ -399,6 +420,9 @@ const A = {
   export: () => download('tide-backup-' + dateKey(new Date()) + '.json', JSON.stringify(state, null, 1), 'application/json'),
   'sync-save': async () => { sync.token = $('#syncToken').value.trim(); if (!sync.token) { toast('Paste a token first'); return; } saveSync(); await syncNow(false); },
   'sync-off': () => { sync = { token: '', gistId: '', last: 0, status: '' }; saveSync(); render(); toast('Sync is off on this device'); },
+  'g-connect': async () => { const v = $('#gClient').value.trim(); if (!/\.apps\.googleusercontent\.com$/.test(v)) { toast('That does not look like a client ID'); return; } state.g.clientId = v; save(true); await gSync(true); },
+  'g-sync': () => gSync(true),
+  'g-off': () => { G.token = ''; G.exp = 0; G.status = ''; try { sessionStorage.removeItem('tide.g'); } catch (e) { /* ignore */ } state.g.connected = false; save(true); render(); toast('Google disconnected'); },
   undo: () => {}
 };
 
@@ -418,7 +442,7 @@ document.addEventListener('input', e => { if (e.target.id === 'jText') setDraft(
 document.addEventListener('toggle', e => { const d = e.target; if (d.dataset && d.dataset.lib && d.open) ui.libOpen = d.dataset.lib; }, true);
 document.addEventListener('submit', e => {
   e.preventDefault(); const f = e.target.dataset.form;
-  if (f === 'task') { const v = $('#taskIn').value.trim(); if (!v) return; state.tasks.push({ id: uid(), text: v, done: false, doneDay: null }); save(); render(); $('#taskIn').focus(); }
+  if (f === 'task') { const v = $('#taskIn').value.trim(); if (!v) return; state.tasks.push({ id: uid(), text: v, done: false, doneDay: null, u: Date.now() }); save(); render(); $('#taskIn').focus(); }
   if (f === 'quote') { const v = $('#quoteIn').value.trim(); if (!v) return; state.quotes.push({ id: uid(), text: v, src: $('#quoteSrc').value.trim() }); save(); render(); }
   if (f === 'block') {
     const d = getDay(viewKey()), { w } = span(); let start = toMin($('#bStart').value); if (start < w - 60) start += 1440;
@@ -472,9 +496,90 @@ async function syncNow(quiet) {
   } catch (err) { say(err.message.startsWith('Git') || err.message.startsWith('The') ? err.message : 'Could not reach GitHub. Will retry when you are online.'); if (!quiet) toast('Sync failed'); }
   syncing = false;
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncNow(true); checkReminders(); } });
+
+// ---------- Google Calendar and Tasks (optional, needs your own OAuth client ID) ----------
+const G = { token: '', exp: 0, status: '', busy: false };
+try { const t = JSON.parse(sessionStorage.getItem('tide.g') || '{}'); if (t.exp > Date.now()) { G.token = t.token; G.exp = t.exp; } } catch (e) { /* none */ }
+const G_SCOPES = 'https://www.googleapis.com/auth/calendar.app.created https://www.googleapis.com/auth/tasks';
+const CAL = 'https://www.googleapis.com/calendar/v3', TASKS = 'https://tasks.googleapis.com/tasks/v1';
+function gOK() { return !!G.token && G.exp > Date.now() + 60000; }
+function loadGIS() { return new Promise((res, rej) => { if (window.google && google.accounts && google.accounts.oauth2) return res(); const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.onload = res; s.onerror = () => rej(new Error('Could not load Google sign-in. Check your connection.')); document.head.appendChild(s); }); }
+async function gAuth() {
+  if (gOK()) return;
+  if (!state.g.clientId) throw new Error('Add your Google client ID in More first.');
+  await loadGIS();
+  await new Promise((res, rej) => {
+    const c = google.accounts.oauth2.initTokenClient({ client_id: state.g.clientId, scope: G_SCOPES,
+      callback: r => { if (r.error || !r.access_token) return rej(new Error('Google sign-in was not completed.')); G.token = r.access_token; G.exp = Date.now() + (r.expires_in || 3600) * 1000; try { sessionStorage.setItem('tide.g', JSON.stringify({ token: G.token, exp: G.exp })); } catch (e) { /* ignore */ } res(); },
+      error_callback: () => rej(new Error('Google sign-in was closed or blocked. Allow pop-ups and try again.')) });
+    c.requestAccessToken({ prompt: state.g.connected ? '' : 'consent' });
+  });
+}
+async function gapi(url, opt) {
+  const r = await fetch(url, Object.assign({}, opt, { headers: { Authorization: 'Bearer ' + G.token, 'Content-Type': 'application/json' } }));
+  if (r.status === 204) return null;
+  const j = await r.json().catch(() => null);
+  if (!r.ok) { const e = new Error((j && j.error && j.error.message) || 'Google error ' + r.status); e.status = r.status; throw e; }
+  return j;
+}
+function iso(key, min) { const d = keyDate(key); d.setMinutes(min); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':00'; }
+async function gCalDay(key) {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone, d = getDay(key), base = CAL + '/calendars/' + encodeURIComponent(state.g.calId) + '/events';
+  const have = (await gapi(base + '?' + new URLSearchParams({ privateExtendedProperty: 'tideDay=' + key, maxResults: '250' }))).items || [];
+  const byId = {}; have.forEach(e => { byId[e.extendedProperties.private.tideId] = e; });
+  for (const b of d.blocks) {
+    const body = { summary: (b.done ? '✓ ' : '') + b.title, description: b.note || '', start: { dateTime: iso(key, b.start), timeZone: tz }, end: { dateTime: iso(key, b.start + Math.max(b.dur, 10)), timeZone: tz }, reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 0 }] }, extendedProperties: { private: { tideDay: key, tideId: b.id } } };
+    const ex = byId[b.id]; delete byId[b.id];
+    if (!ex) await gapi(base, { method: 'POST', body: JSON.stringify(body) });
+    else if (ex.summary !== body.summary || (ex.description || '') !== body.description || new Date(ex.start.dateTime).getTime() !== new Date(body.start.dateTime).getTime() || new Date(ex.end.dateTime).getTime() !== new Date(body.end.dateTime).getTime()) await gapi(base + '/' + ex.id, { method: 'PATCH', body: JSON.stringify(body) });
+  }
+  for (const e of Object.values(byId)) await gapi(base + '/' + e.id, { method: 'DELETE' });
+}
+async function gTasks() {
+  if (!state.g.listId) { const ls = (await gapi(TASKS + '/users/@me/lists?maxResults=100')).items || []; const f = ls.find(l => l.title === 'Tide'); state.g.listId = f ? f.id : (await gapi(TASKS + '/users/@me/lists', { method: 'POST', body: JSON.stringify({ title: 'Tide' }) })).id; }
+  const base = TASKS + '/lists/' + state.g.listId + '/tasks', today = logicalNow().key;
+  for (const id of state.g.delTasks.splice(0)) await gapi(base + '/' + id, { method: 'DELETE' }).catch(() => {});
+  let remote = [], page = '';
+  do { const r = await gapi(base + '?maxResults=100&showCompleted=true&showHidden=true' + (page ? '&pageToken=' + page : '')); remote = remote.concat(r.items || []); page = r.nextPageToken; } while (page);
+  const rmap = {}; remote.forEach(r => { rmap[r.id] = r; });
+  for (const t of state.tasks.slice()) {
+    const want = { title: t.text, status: t.done ? 'completed' : 'needsAction' };
+    if (!t.gid) { t.gid = (await gapi(base, { method: 'POST', body: JSON.stringify(want) })).id; continue; }
+    const r = rmap[t.gid]; delete rmap[t.gid];
+    if (!r) { state.tasks = state.tasks.filter(x => x !== t); continue; }
+    const rdone = r.status === 'completed', ru = new Date(r.updated).getTime();
+    if (rdone !== t.done || r.title !== t.text) {
+      if (ru > (t.u || 0)) { t.text = r.title; t.done = rdone; t.doneDay = rdone ? today : null; t.u = ru; }
+      else await gapi(base + '/' + t.gid, { method: 'PATCH', body: JSON.stringify(want) });
+    }
+  }
+  Object.values(rmap).forEach(r => { if (r.title && r.status !== 'completed') state.tasks.push({ id: uid(), text: r.title, done: false, doneDay: null, gid: r.id, u: new Date(r.updated).getTime() }); });
+}
+async function gSync(interactive) {
+  if (G.busy || (!interactive && !gOK())) return; G.busy = true;
+  const say = m => { G.status = m; const el = $('#gStatus'); if (el) el.textContent = m; };
+  try {
+    say('Syncing with Google…'); await gAuth();
+    const run = async () => {
+      if (!state.g.calId) state.g.calId = (await gapi(CAL + '/calendars', { method: 'POST', body: JSON.stringify({ summary: 'Tide', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }) })).id;
+      const now = logicalNow().key; for (const k of Array.from(new Set([now, addDays(now, 1), viewKey()]))) await gCalDay(k);
+      await gTasks();
+    };
+    try { await run(); } catch (e) { if (e.status !== 404) throw e; state.g.calId = ''; state.g.listId = ''; await run(); }
+    state.g.connected = true; state.g.last = Date.now(); G.status = ''; save(true);
+    if (interactive) toast('Calendar and tasks are in sync');
+  } catch (err) {
+    if (err.status === 401) { G.token = ''; G.exp = 0; }
+    G.status = err.status === 401 ? 'Google needs you to confirm again. Tap Sync now.' : err.status === 403 ? 'Google refused: ' + err.message + ' Check that both APIs are enabled.' : err.message;
+    if (interactive) toast('Google sync did not finish');
+  }
+  G.busy = false;
+  if ($('#sheet').hidden && !document.activeElement.matches('input,textarea')) render();
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncNow(true); if (state.g.connected) gSync(false); checkReminders(); } });
 
 // ---------- boot ----------
 render();
 syncNow(true);
+if (state.g.connected) gSync(false);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
