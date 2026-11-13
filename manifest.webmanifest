@@ -5,10 +5,75 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0d3b4a",
-  "theme_color": "#0d3b4a",
+  "background_color": "#091012",
+  "theme_color": "#091012",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "id": "./",
+  "orientation": "portrait",
+  "categories": [
+    "health",
+    "lifestyle",
+    "productivity"
+  ],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "shortcuts": [
+    {
+      "name": "A wave hit",
+      "short_name": "Wave hit",
+      "url": "./#wave",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Journal",
+      "url": "./#journal",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Breathing",
+      "short_name": "Breathe",
+      "url": "./#calm",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Progress",
+      "url": "./#progress",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
   ]
 }

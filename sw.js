@@ -1,6 +1,6 @@
 // Offline support: serve from cache, refresh the cache in the background.
-const CACHE = 'tide-v2';
-const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'img/dawn.webp', 'img/day.webp', 'img/dusk.webp', 'img/night.webp', 'img/journal.webp', 'img/calm.webp', 'img/plan.webp', 'img/more.webp', 'img/wave.webp'];
+const CACHE = 'tide-v3';
+const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'photos.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {

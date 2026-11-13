@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Tide</title>
 <meta name="description" content="A daily rhythm you can reshape: schedule, tasks, journal, breathing and a calm kit.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://api.github.com https://gist.githubusercontent.com https://www.googleapis.com https://tasks.googleapis.com https://accounts.google.com; frame-src https://accounts.google.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#091012">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -27,9 +29,9 @@
 
 <nav class="tabs" aria-label="Sections">
   <button data-tab="today">Today</button>
-  <button data-tab="plan">Plan</button>
-  <button data-tab="journal">Journal</button>
+    <button data-tab="journal">Journal</button>
   <button data-tab="calm">Calm</button>
+  <button data-tab="progress">Progress</button>
   <button data-tab="more">More</button>
 </nav>
 
@@ -37,8 +39,17 @@
   <div class="sheet-bg" data-act="close-sheet"></div>
   <div class="sheet-card" role="dialog" aria-modal="true"><div id="sheetBody"></div></div>
 </div>
+<div id="lock" class="lock" hidden>
+  <form data-form="unlock" class="lock-card">
+    <span class="mark">Tide</span>
+    <p id="lockMsg">Enter your PIN</p>
+    <input type="password" id="pinIn" inputmode="numeric" autocomplete="off" maxlength="8" aria-label="PIN">
+    <button class="btn primary">Unlock</button>
+  </form>
+</div>
 <div id="toast" class="toast" hidden></div>
 
+<script src="photos.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
