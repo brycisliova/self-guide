@@ -43,6 +43,28 @@ python3 -m http.server 8000
 
 Then open `http://localhost:8000`.
 
+## Android app
+
+`android/` is a native Android project. It shows the same screens from this repository inside the app and adds what a web page cannot do:
+
+- **Widgets**: *Now and next* (current block, next block, progress, a Done button), *Steps and streak*, and a one-tap *Wave hit*.
+- **Steps**: read from the phone's step-counter sensor every fifteen minutes or so and whenever the app opens. Counting starts when you allow physical-activity access.
+- **Reminders**: a notification at the start of each block, even with the app closed. Android may delay it a few minutes.
+- **Phone calendar**: add any block to the calendar app directly.
+
+Every push builds it and publishes the file at
+`https://github.com/<owner>/self-guide/releases/download/android-latest/Tide.apk`. Open that link on the phone, allow installs from the browser when asked, and install. Later builds install over earlier ones and keep your data.
+
+Not in the Android app: the Google sign-in link (Google blocks sign-in inside embedded app screens) and reading Digital Wellbeing (Android does not allow it).
+
+The signing key (`android/tide.keystore`) is committed so that every build can update the last one. That makes the key public: anyone could sign a file that your phone would accept as an update to Tide. Only ever install `Tide.apk` from your own repository's release page.
+
+Build locally with the Android SDK installed:
+
+```bash
+cd android && ./gradlew assembleRelease
+```
+
 ## Privacy and security
 
 - Journal, mood, tasks and logs are stored in the browser only. Nothing personal is in this repository.

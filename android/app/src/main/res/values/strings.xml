@@ -1,0 +1,5 @@
+<resources>
+    <string name="widget_now_info">What you are doing now, what comes next, and a Done button.</string>
+    <string name="widget_steps_info">Steps today against your goal, and your streak.</string>
+    <string name="widget_wave_info">One tap to the calm steps when a wave hits.</string>
+</resources>

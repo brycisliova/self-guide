@@ -2,6 +2,7 @@
 'use strict';
 
 // ---------- helpers ----------
+const NATIVE = window.TideNative || null; // set when running inside the Android app
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -99,7 +100,7 @@ const ui = { tab: 'today', open: null, dayOffset: 0, showPast: false, prompt: 0,
 function persist() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { toast('Could not save on this device. Storage is full or blocked.'); } }
 let pushTimer = null, gTimer = null;
 function save(noG) {
-  state.updatedAt = Date.now(); persist();
+  state.updatedAt = Date.now(); persist(); nativePush();
   if (sync.token) { clearTimeout(pushTimer); pushTimer = setTimeout(() => syncNow(true), 4000); }
   if (!noG && state.g.connected && gOK()) { clearTimeout(gTimer); gTimer = setTimeout(() => gSync(false), 5000); }
 }
@@ -211,6 +212,7 @@ function ics(key, blocks, recur) {
   L.push('END:VCALENDAR'); return L.join('\r\n');
 }
 function download(name, text, type) {
+  if (NATIVE) { NATIVE.saveFile(name, text, type); return; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
@@ -304,7 +306,7 @@ function renderProgress() {
     '<section class="card"><h2>Last four weeks</h2><div class="heat">' + cells + '</div><p class="small muted">Each square is a day. Darker means more of the plan done. A ring marks today. Blank days are just blank, not failures.</p></section>' +
     '<section class="card"><h2>Mood</h2>' + moodBars(14) + '<p class="small muted">Fourteen days, from the check on Today. Look at the direction, not single days.</p></section>' +
     '<section class="card"><h2>Waves</h2><div class="bars labelled">' + weeks.map((c, i) => '<div><i class="' + (c ? '' : 'none') + '" style="height:' + (c ? c / maxW * 100 : 4) + '%"></i><span>' + c + '</span></div>').join('') + '</div><p class="small muted">Per week, oldest to newest. ' + (state.waves.length < 2 ? 'Log waves with the Wave hit button and the pattern shows up here.' : wThis < wLast ? 'Fewer this week than last. It is easing.' : wThis === wLast ? 'Level with last week. Each one still ended.' : 'More this week than last. That happens. Each one still ended.') + '</p></section>' +
-    '<section class="card"><h2>Body</h2><p class="small muted">Tide cannot read your phone\'s step counter or Digital Wellbeing; no website can. Copy today\'s numbers from Shelf and from Settings → Digital Wellbeing once in the evening. It takes ten seconds.</p>' +
+    '<section class="card"><h2>Body</h2>' + (NATIVE ? (!NATIVE.hasStepSensor() ? '<p class="small muted">This phone has no step-counter sensor, so type your steps in.</p>' : NATIVE.stepsAllowed() ? '<p class="small muted">Steps are counted by your phone\'s step sensor and fill in on their own. Counting starts from the moment you allowed it. Screen time and sleep still need typing in: Android does not let apps read Digital Wellbeing.</p>' : '<p class="small muted">Allow physical-activity access and Tide counts your steps on its own.</p><div class="row"><button class="btn primary" data-act="ask-steps">Allow step counting</button></div>') : '<p class="small muted">Tide cannot read your phone\'s step counter or Digital Wellbeing; no website can. Copy today\'s numbers from Shelf and from Settings → Digital Wellbeing once in the evening. It takes ten seconds.</p>') +
     '<div class="grid3"><label class="f">Steps<input type="number" id="logSteps" data-log="steps" inputmode="numeric" min="0" max="100000" value="' + (lg.steps || '') + '" placeholder="' + goal + '"></label><label class="f">Screen hours<input type="number" id="logScreen" data-log="screen" inputmode="decimal" min="0" max="24" step="0.25" value="' + (lg.screen || '') + '" placeholder="3.5"></label><label class="f">Sleep hours<input type="number" id="logSleep" data-log="sleep" inputmode="decimal" min="0" max="16" step="0.25" value="' + (lg.sleep || '') + '" placeholder="7.5"></label></div>' +
     '<div class="bars labelled">' + logs.map(l => '<div><i class="' + (l.steps ? '' : 'none') + (l.steps >= goal ? ' hit' : '') + '" style="height:' + (l.steps ? Math.min(100, l.steps / goal * 100) : 4) + '%"></i><span>' + (l.steps ? (l.steps / 1000).toFixed(1) + 'k' : '·') + '</span></div>').join('') + '</div>' +
     '<div class="stat"><div><b>' + (avg('steps') ? Math.round(avg('steps') / 100) / 10 + '<small>k</small>' : '–') + '</b><span>steps a day, 7-day average</span></div><div><b>' + (avg('screen') ? avg('screen').toFixed(1) + '<small>h</small>' : '–') + '</b><span>screen time a day</span></div><div><b>' + (avg('sleep') ? avg('sleep').toFixed(1) + '<small>h</small>' : '–') + '</b><span>sleep a night</span></div></div></section>' +
@@ -323,7 +325,7 @@ function renderPlan() {
     '<section class="card"><h2>Anchors</h2><p class="small muted">The few things that make a day count even when everything else slips. Rename them to fit you.</p>' + s.anchors.map((a, i) => '<label class="f">Anchor ' + (i + 1) + '<input type="text" id="anchor' + i + '" data-anchor="' + i + '" value="' + esc(a.label) + '" maxlength="40"></label>').join('') + '</section>' +
     '<section class="card"><h2>Apply</h2><p class="small muted">Changing settings does not touch days you already edited. Rebuild when you want a fresh plan.</p><div class="row"><button class="btn primary" data-act="rebuild" data-n="0">Rebuild today</button><button class="btn" data-act="rebuild" data-n="1">Rebuild tomorrow</button></div>' +
     '<div class="row"><button class="btn" data-act="save-template">Save today as my default</button>' + (state.template ? '<button class="btn danger" data-act="clear-template">Clear my default</button>' : '') + '</div><p class="small muted">' + (state.template ? 'New days copy your saved default.' : 'New days are built from the settings above.') + '</p></section>' +
-    '<section class="card"><h2>Reminders</h2><label class="tog"><input type="checkbox" data-act="notify"' + (s.notify ? ' checked' : '') + '> Notify me when a block starts</label><p class="small muted">Browser notifications only fire while Tide is open or recently used. For reminders that always fire, open Today, tap Calendar and share, and add the day to your phone calendar. Each event carries its own alert.</p></section>';
+    '<section class="card"><h2>Reminders</h2><label class="tog"><input type="checkbox" data-act="notify"' + (s.notify ? ' checked' : '') + '> Notify me when a block starts</label><p class="small muted">' + (NATIVE ? 'The app notifies you at the start of each block, even when it is closed. Android may delay a reminder by a few minutes to save battery.' : 'Browser notifications only fire while Tide is open or recently used. For reminders that always fire, open Today, tap Calendar and share, and add the day to your phone calendar. Each event carries its own alert.') + '</p></section>';
 }
 
 function renderJournal() {
@@ -371,14 +373,17 @@ function renderMore() {
   const today = getDay(logicalNow().key), n = ncDays();
   return hero(photo('more'), 'More', 'Tools and <em>notes</em>', '') + '<!--b-->' +
     '<section class="card"><h2>Shape your day</h2><p class="small muted">Wake and lights-out times, day type, focus blocks, anchors, reminders.</p><div class="row"><button class="btn primary" data-act="go" data-v="plan">Open Plan</button></div></section>' +
-    '<section class="card"><h2>Put Tide on your home screen</h2>' + (installEvt ? '<div class="row"><button class="btn primary" data-act="install">Install Tide</button></div>' : '') +
-    '<ul class="plain small"><li><b>OnePlus / Android:</b> open this page in Chrome → ⋮ menu → Add to Home screen → Install. Long-press the Tide icon afterwards for shortcuts to Wave hit, Journal, Breathing and Progress.</li><li><b>Mac:</b> in Chrome, ⋮ → Cast, save and share → Install page as app. In Safari, File → Add to Dock.</li><li><b>Widgets:</b> a web app cannot place its own widget. Connect Google below, then add the Google Calendar and Google Tasks widgets to your home screen or Shelf: they show your Tide day and your Tide tasks, and you can tick tasks from the widget.</li></ul></section>' +
+    (NATIVE ? '<section class="card"><h2>Widgets</h2><ul class="plain small"><li>Long-press an empty spot on your home screen → Widgets → Tide.</li><li><b>Now and next</b> shows the current block with a Done button.</li><li><b>Steps and streak</b> shows today\'s steps against your goal.</li><li><b>Wave hit</b> is a one-tap shortcut to the calm steps.</li><li>On OnePlus, also allow Tide to run in the background (Settings → Battery → Tide → Allow background activity) so widgets and reminders stay current.</li></ul></section>' : '') +
+    (NATIVE ? '' : '<section class="card"><h2>Android app</h2><p class="small muted">A native version with real home-screen widgets, automatic step counting and reminders that fire when the app is closed.</p><div class="row"><a class="btn primary" href="https://github.com/brycisliova/self-guide/releases/download/android-latest/Tide.apk" rel="noopener">Download Tide.apk</a></div><p class="small muted">It keeps its own data. Move yours across with Backup below: download here, restore there.</p></section>') +
+    (NATIVE ? '' : '<section class="card"><h2>Put Tide on your home screen</h2>' + (installEvt ? '<div class="row"><button class="btn primary" data-act="install">Install Tide</button></div>' : '') +
+    '<ul class="plain small"><li><b>OnePlus / Android:</b> open this page in Chrome → ⋮ menu → Add to Home screen → Install. Long-press the Tide icon afterwards for shortcuts to Wave hit, Journal, Breathing and Progress.</li><li><b>Mac:</b> in Chrome, ⋮ → Cast, save and share → Install page as app. In Safari, File → Add to Dock.</li><li><b>Widgets:</b> a web app cannot place its own widget. Connect Google below, then add the Google Calendar and Google Tasks widgets to your home screen or Shelf: they show your Tide day and your Tide tasks, and you can tick tasks from the widget.</li></ul></section>') +
     '<section class="card"><h2>What to take in, what to skip</h2><h3>Take in</h3><ul class="plain">' + CONSUME.yes.map(x => '<li>' + x + '</li>').join('') + '</ul><h3>Skip</h3><ul class="plain">' + CONSUME.no.map(x => '<li>' + x + '</li>').join('') + '</ul></section>' +
     '<section class="card"><h2>Library</h2><p class="small muted">Key ideas in plain words, with room for your own takeaways.</p>' + LIBRARY.map(l => '<details' + (ui.libOpen === l.id ? ' open' : '') + ' data-lib="' + l.id + '"><summary>' + esc(l.title) + '</summary><div><ul class="plain">' + l.points.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' + (l.link ? '<a href="' + l.link + '" target="_blank" rel="noopener">' + esc(l.linkText) + '</a>' : '') + '<label class="f">My takeaways<textarea id="note-' + l.id + '" data-note="' + l.id + '" placeholder="What I want to remember and use">' + esc(state.notes[l.id] || '') + '</textarea></label></div></details>').join('') + '</section>' +
     '<section class="card"><h2>Quote notebook</h2><form class="stack" data-form="quote"><input type="text" id="quoteIn" placeholder="A line worth keeping" autocomplete="off"><div class="addrow"><input type="text" id="quoteSrc" placeholder="Who said it (optional)" autocomplete="off"><button class="btn primary">Keep</button></div></form>' +
     (state.quotes.length ? '<ul class="list">' + state.quotes.slice().reverse().map(q => '<li><div class="txt"><span class="quote">' + esc(q.text) + '</span>' + (q.src ? '\n<span class="eyebrow">' + esc(q.src) + '</span>' : '') + '</div><button class="x" data-act="quote-del" data-id="' + q.id + '" aria-label="Delete quote">×</button></li>').join('') + '</ul>' : '') + '</section>' +
     '<section class="card"><h2>Google Calendar and Tasks</h2><p class="small muted">Connect once and Tide keeps a calendar named Tide (today and tomorrow, with an alert at each block) and a task list named Tide in your Google account. Tasks sync both ways: tick one in Google Tasks and it is ticked here.</p>' +
-    (state.g.connected ? '<div class="row"><button class="btn primary" data-act="g-sync">Sync now</button><button class="btn danger" data-act="g-off">Disconnect</button></div>' : '<details><summary>One-time setup, about five minutes</summary><div><ol class="steps"><li>Open console.cloud.google.com and create a project.</li><li>APIs and Services → Library: enable <b>Google Calendar API</b> and <b>Google Tasks API</b>.</li><li>OAuth consent screen: choose External, fill in the app name and your email, and add your own Gmail address under Test users.</li><li>Credentials → Create credentials → OAuth client ID → Web application. Under Authorised JavaScript origins add <b>' + esc(location.origin) + '</b>.</li><li>Copy the client ID and paste it below.</li></ol></div></details><label class="f">Google client ID<input type="text" id="gClient" value="' + esc(state.g.clientId) + '" placeholder="…apps.googleusercontent.com" autocomplete="off"></label><div class="row"><button class="btn primary" data-act="g-connect">Connect Google</button></div>') +
+    (NATIVE ? '<p class="small"><b>Not available inside the Android app:</b> Google blocks its sign-in in embedded app screens. Here, use Add to phone calendar on any block, or the calendar file for a whole day.</p>' : '') +
+    (NATIVE ? '' : state.g.connected ? '<div class="row"><button class="btn primary" data-act="g-sync">Sync now</button><button class="btn danger" data-act="g-off">Disconnect</button></div>' : '<details><summary>One-time setup, about five minutes</summary><div><ol class="steps"><li>Open console.cloud.google.com and create a project.</li><li>APIs and Services → Library: enable <b>Google Calendar API</b> and <b>Google Tasks API</b>.</li><li>OAuth consent screen: choose External, fill in the app name and your email, and add your own Gmail address under Test users.</li><li>Credentials → Create credentials → OAuth client ID → Web application. Under Authorised JavaScript origins add <b>' + esc(location.origin) + '</b>.</li><li>Copy the client ID and paste it below.</li></ol></div></details><label class="f">Google client ID<input type="text" id="gClient" value="' + esc(state.g.clientId) + '" placeholder="…apps.googleusercontent.com" autocomplete="off"></label><div class="row"><button class="btn primary" data-act="g-connect">Connect Google</button></div>') +
     '<p class="small muted" id="gStatus">' + esc(G.status || (state.g.connected ? (state.g.last ? 'Last synced ' + new Date(state.g.last).toLocaleString() : 'Connected.') + ' Google asks you to confirm again about once an hour; tap Sync now when it does.' : 'Not connected. Without it, use Calendar and share on the Today screen to add a day to any calendar.')) + '</p></section>' +
     '<section class="card"><h2>Sync across devices</h2><p class="small muted">Optional. Tide can keep a copy of your data in a secret GitHub gist on your own account and pull it on your other devices. Create a token at github.com → Settings → Developer settings → Fine-grained tokens with only the Gists permission (read and write), then paste it on each device. A secret gist is unlisted, but anyone who has its link can read it, so never share that link.</p>' +
     '<label class="f">GitHub token<input type="password" id="syncToken" value="' + esc(sync.token) + '" placeholder="github_pat_…" autocomplete="off"></label><div class="row"><button class="btn primary" data-act="sync-save">' + (sync.token ? 'Sync now' : 'Turn on sync') + '</button>' + (sync.token ? '<button class="btn danger" data-act="sync-off">Turn off on this device</button>' : '') + '</div><p class="small muted" id="syncStatus">' + esc(sync.status || (sync.last ? 'Last synced ' + new Date(sync.last).toLocaleString() : 'Not syncing. Data lives on this device only.')) + '</p></section>' +
@@ -414,9 +419,10 @@ function calSheet(b) {
   const key = viewKey(), r = calSheet.recur || 'once';
   const title = b ? 'Add "' + esc(b.title) + '" to calendar' : 'Whole day to calendar';
   openSheet('<h2>' + title + '</h2><div class="row">' + Object.entries(RECUR).map(([k, v]) => '<button class="chip' + (r === k ? ' on' : '') + '" data-act="cal-recur" data-id="' + (b ? b.id : '') + '" data-v="' + k + '">' + v[0] + '</button>').join('') + '</div>' +
-    (b ? '<a class="btn primary" href="' + esc(gcalLink(key, b, r)) + '" target="_blank" rel="noopener">Open in Google Calendar</a>' : '') +
+    (b && NATIVE ? '<button class="btn primary" data-act="native-cal" data-id="' + b.id + '">Add to phone calendar</button>' : '') +
+    (b ? '<a class="btn' + (NATIVE ? '' : ' primary') + '" href="' + esc(gcalLink(key, b, r)) + '" target="_blank" rel="noopener">Open in Google Calendar</a>' : '') +
     '<button class="btn' + (b ? '' : ' primary') + '" data-act="cal-ics" data-id="' + (b ? b.id : '') + '">Download calendar file (.ics)</button><p class="small muted">Opening the .ics file adds ' + (b ? 'this block' : 'every block') + ' to your phone calendar (Google, Apple, Outlook) with an alert at the start time.</p>' +
-    (b ? '' : '<button class="btn" data-act="copy-plan">Copy plan as text</button>' + (navigator.share ? '<button class="btn" data-act="share-plan">Share plan</button>' : '')) + '<button class="btn quiet" data-act="close-sheet">Close</button>');
+    (b ? '' : '<button class="btn" data-act="copy-plan">Copy plan as text</button>' + (navigator.share || NATIVE ? '<button class="btn" data-act="share-plan">Share plan</button>' : '')) + '<button class="btn quiet" data-act="close-sheet">Close</button>');
 }
 const WAVE = [
   () => '<div class="eyebrow">Step 1 of 4</div><h2>Breathe out slowly</h2><p class="muted">In for 4, out for 8. Four rounds. The long exhale tells your body the alarm is over.</p>' + pacerHtml(),
@@ -457,7 +463,9 @@ const A = {
   'cal-recur': (el) => { calSheet.recur = el.dataset.v; calSheet(el.dataset.id ? findBlock(el.dataset.id) : null); },
   'cal-ics': (el) => { const key = viewKey(), b = el.dataset.id && findBlock(el.dataset.id); download(b ? 'tide-block.ics' : 'tide-' + key + '.ics', ics(key, b ? [b] : getDay(key).blocks, calSheet.recur || 'once'), 'text/calendar'); toast('Open the downloaded file to add it'); },
   'copy-plan': () => copy(planText(viewKey()), 'Plan copied'),
-  'share-plan': () => navigator.share({ title: 'My plan', text: planText(viewKey()) }).catch(() => {}),
+  'share-plan': () => { if (NATIVE) NATIVE.share(planText(viewKey())); else navigator.share({ title: 'My plan', text: planText(viewKey()) }).catch(() => {}); },
+  'native-cal': (el) => { const b = findBlock(el.dataset.id), m0 = keyDate(viewKey()).getTime(); NATIVE.addEvent(b.title, b.note || '', m0 + b.start * 60000, m0 + (b.start + Math.max(b.dur, 10)) * 60000); closeSheet(); },
+  'ask-steps': () => NATIVE.askSteps(),
   day: (el) => { ui.dayOffset = +el.dataset.n === 0 ? 0 : ui.dayOffset + +el.dataset.n; ui.open = null; render(); },
   mood: (el) => { const d = getDay(viewKey()); d.mood = d.mood === +el.dataset.n ? 0 : +el.dataset.n; save(); render(); if (d.mood === 1) toast('Heavy days count too. Try the Gentle day type in Plan.'); },
   task: (el) => { const t = state.tasks.find(x => x.id === el.dataset.id); t.done = !t.done; t.doneDay = t.done ? logicalNow().key : null; t.u = Date.now(); save(); render(); },
@@ -468,7 +476,7 @@ const A = {
   rebuild: (el) => { const key = addDays(logicalNow().key, +el.dataset.n); const old = state.days[key] || {}; state.days[key] = { blocks: buildDay(), mood: old.mood || 0, nc: old.nc || {} }; save(); ui.dayOffset = +el.dataset.n; ui.tab = 'today'; render(); window.scrollTo(0, 0); toast('Fresh plan built'); },
   'save-template': () => { state.template = getDay(logicalNow().key).blocks.map(b => ({ start: b.start, dur: b.dur, cat: b.cat, title: b.title, note: b.note })); save(); render(); toast('Saved. New days will copy today.'); },
   'clear-template': () => { state.template = null; save(); render(); },
-  notify: async (el) => { if (el.checked) { if (!('Notification' in window)) { toast('This browser does not support notifications'); el.checked = false; return; } const p = await Notification.requestPermission(); if (p !== 'granted') { toast('Notifications are blocked in browser settings'); el.checked = false; return; } } state.settings.notify = el.checked; save(); },
+  notify: async (el) => { if (NATIVE) { state.settings.notify = el.checked; if (el.checked) NATIVE.askNotify(); save(); return; } if (el.checked) { if (!('Notification' in window)) { toast('This browser does not support notifications'); el.checked = false; return; } const p = await Notification.requestPermission(); if (p !== 'granted') { toast('Notifications are blocked in browser settings'); el.checked = false; return; } } state.settings.notify = el.checked; save(); },
   prompt: (el) => { ui.prompt = +el.dataset.n; setDraft(''); render(); },
   jmood: (el) => { const t = $('#jText'); if (t) setDraft(t.value); ui.jmood = ui.jmood === +el.dataset.n ? 0 : +el.dataset.n; render(); },
   jsave: () => { const text = $('#jText').value.trim(); if (!text || text === PROMPTS[ui.prompt][1].trim()) { toast('Write something first'); return; } state.journal.push({ id: uid(), ts: Date.now(), prompt: PROMPTS[ui.prompt][0], text, mood: ui.jmood }); setAnchor('write', true); ui.jmood = 0; setDraft(''); save(); render(); toast('Saved'); },
@@ -580,7 +588,7 @@ window.addEventListener('appinstalled', () => { installEvt = null; });
 const notified = new Set();
 function checkReminders() {
   const now = logicalNow();
-  if (state.settings.notify && 'Notification' in window && Notification.permission === 'granted') {
+  if (!NATIVE && state.settings.notify && 'Notification' in window && Notification.permission === 'granted') {
     getDay(now.key).blocks.forEach(b => {
       if (b.start === now.min && !b.done && !notified.has(now.key + b.id)) {
         notified.add(now.key + b.id); const body = b.note || (b.dur ? dur(b.dur) : '');
@@ -700,10 +708,33 @@ async function gSync(interactive) {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncNow(true); if (state.g.connected) gSync(false); checkReminders(); } });
 
+// ---------- Android app bridge ----------
+function nativePush() {
+  if (!NATIVE) return; const k = logicalNow().key, { w, b } = span();
+  const pack = key => ({ key, blocks: getDay(key).blocks.map(x => ({ id: x.id, start: x.start, dur: x.dur, title: x.title, cat: x.cat, done: !!x.done })) });
+  try { NATIVE.push(JSON.stringify({ days: [pack(k), pack(addDays(k, 1))], wakeMin: w, bedMin: b, streak: streak(), stepGoal: state.settings.stepGoal || 8000, notify: !!state.settings.notify })); } catch (e) { /* bridge unavailable */ }
+}
+window.nativeSteps = function (m, quiet) {
+  let ch = false;
+  try { if (typeof m === 'string') m = JSON.parse(m); Object.keys(m).forEach(k => { const d = state.days[k]; if (d && m[k] > 0) { d.log = d.log || {}; if (d.log.steps !== m[k]) { d.log.steps = m[k]; ch = true; } } }); } catch (e) { /* ignore */ }
+  if (ch && !quiet) { save(); if (idle()) render(); }
+  return ch;
+};
+function nativePull() {
+  if (!NATIVE) return; let ch = false; getDay(logicalNow().key);
+  try { JSON.parse(NATIVE.takePending() || '[]').forEach(p => { const d = state.days[p.key], blk = d && d.blocks.find(x => x.id === p.id); if (blk && !blk.done) { blk.done = true; ch = true; } }); } catch (e) { /* ignore */ }
+  try { ch = window.nativeSteps(NATIVE.stepsJson(), true) || ch; } catch (e) { /* ignore */ }
+  if (ch) save(); else nativePush();
+}
+window.nativeResume = function () { nativePull(); if (idle()) render(); };
+window.nativeRoute = function (r) { if (r === 'wave') { A.wave(); return; } if (['today', 'journal', 'calm', 'progress', 'plan', 'more'].includes(r)) { closeSheet(); ui.tab = r; render(); window.scrollTo(0, 0); } };
+window.nativeBack = function () { if (!$('#lock').hidden) return false; if (!$('#sheet').hidden) { closeSheet(); return true; } if (ui.tab !== 'today' || ui.dayOffset) { ui.tab = 'today'; ui.dayOffset = 0; render(); window.scrollTo(0, 0); return true; } return false; };
+
 // ---------- boot ----------
 (function route() { const h = location.hash.slice(1); if (['journal', 'calm', 'progress', 'plan', 'more'].includes(h)) ui.tab = h; if (h) history.replaceState(null, '', location.pathname); if (h === 'wave') setTimeout(() => A.wave(), 300); })();
 lockNow();
+nativePull();
 render();
 syncNow(true);
 if (state.g.connected) gSync(false);
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if (!NATIVE && 'serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
