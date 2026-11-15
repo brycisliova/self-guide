@@ -10,7 +10,7 @@
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="Tide"
+        android:label="Ebb"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
 
@@ -22,15 +22,15 @@
             </intent-filter>
         </activity>
 
-        <receiver android:name=".NowWidget" android:exported="true" android:label="Tide: now and next">
+        <receiver android:name=".NowWidget" android:exported="true" android:label="Ebb: now and next">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_now_info" />
         </receiver>
-        <receiver android:name=".StepsWidget" android:exported="true" android:label="Tide: steps and streak">
+        <receiver android:name=".StepsWidget" android:exported="true" android:label="Ebb: steps and streak">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_steps_info" />
         </receiver>
-        <receiver android:name=".WaveWidget" android:exported="true" android:label="Tide: wave hit">
+        <receiver android:name=".WaveWidget" android:exported="true" android:label="Ebb: wave hit">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_wave_info" />
         </receiver>

@@ -1,4 +1,4 @@
-/* Tide: a daily rhythm you can reshape. All data stays in this browser unless you turn on sync. */
+/* Ebb: a daily rhythm you can reshape. All data stays in this browser unless you turn on sync. */
 'use strict';
 
 // ---------- helpers ----------
@@ -72,7 +72,7 @@ const CONSUME = {
 const KEY = 'tide.v1', SYNC_KEY = 'tide.sync';
 const blank = () => ({
   v: 1, updatedAt: 0,
-  settings: { wake: '08:00', bed: '00:30', dayType: 'weekday', work: 3, inc: { move: true, nap: true, friends: true, journal: true, meditate: true, detox: true }, notify: false, theme: 'auto', stepGoal: 8000, lock: null,
+  settings: { hand: true, wake: '08:00', bed: '00:30', dayType: 'weekday', work: 3, inc: { move: true, nap: true, friends: true, journal: true, meditate: true, detox: true }, notify: false, theme: 'auto', stepGoal: 8000, lock: null,
     anchors: [{ id: 'move', label: 'Moved my body' }, { id: 'write', label: 'Wrote it out' }, { id: 'people', label: 'Time with a person' }, { id: 'sleep', label: 'Lights out on time' }] },
   template: null, days: {}, tasks: [], journal: [], waves: [], quotes: [], notes: {},
   nc: { start: null, best: 0, resets: 0 },
@@ -118,9 +118,9 @@ function logicalNow() {
 const viewKey = () => addDays(logicalNow().key, ui.dayOffset);
 
 // ---------- schedule builder ----------
-function buildDay(typeOverride) {
+function buildDay(typeOverride, wakeOverride) {
   const s = state.settings, T = DAY_TYPES[typeOverride || s.dayType] || DAY_TYPES.weekday, inc = s.inc;
-  const { w, b } = span();
+  let { w, b } = span(); if (wakeOverride != null) w = Math.min(wakeOverride, b - 300);
   let nWork = s.work; if (T.maxWork != null) nWork = Math.min(nWork, T.maxWork); if (T.minWork != null) nWork = Math.max(nWork, T.minWork);
   const out = []; const B = (start, d, cat, title, note) => out.push({ id: uid(), start, dur: d, cat, title, note: note || '', done: false });
   const workItem = (n, p) => ({ d: T.workLen, cat: 'work', title: (T.workTitle || 'Focus block') + ' ' + n, note: 'One task. Phone out of reach.', p });
@@ -169,6 +169,7 @@ function buildDay(typeOverride) {
   B(wind + 90, 30, 'rest', 'Set out tomorrow, read on paper', 'Phone across the room.');
   B(b, 0, 'sleep', 'Lights out', '');
   out.sort((x, y) => x.start - y.start);
+  for (let i = 1; i < out.length; i++) { const prev = out[i - 1]; if (out[i].dur && out[i].start < prev.start + prev.dur) out[i].start = prev.start + prev.dur; }
   let n = 0; out.forEach(x => { if (/block \d$/.test(x.title)) x.title = x.title.replace(/\d$/, ++n); });
   return out;
 }
@@ -180,7 +181,33 @@ function getDay(key) {
   const d = state.days[key]; if (!d.nc) d.nc = {}; if (!d.anchors) d.anchors = {}; if (!d.log) d.log = {}; return d;
 }
 const findBlock = id => getDay(viewKey()).blocks.find(x => x.id === id);
-const sortDay = d => d.blocks.sort((x, y) => x.start - y.start);
+const isFixed = x => x.cat === 'sleep' && !x.dur;
+const sortDay = d => d.blocks.sort((x, y) => (isFixed(x) - isFixed(y)) || x.start - y.start);
+// one step of undo for anything that rearranges a day
+function snap() { const key = viewKey(); ui.undo = { key, blocks: JSON.stringify(getDay(key).blocks) }; }
+function toastUndo(msg) { const t = $('#toast'); t.innerHTML = esc(msg) + ' <button class="btn sm" data-act="undo">Undo</button>'; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 7000); }
+// the day is a chain: when one block moves or changes length, the ones after it follow
+function ripple(d, from, delta, incl) { const i = d.blocks.indexOf(from); d.blocks.forEach((x, j) => { if ((j > i || (incl && j === i)) && !isFixed(x)) x.start += delta; }); sortDay(d); }
+function applyOrder(d, from, to) {
+  const by = {}; d.blocks.forEach(b => { by[b.id] = b; });
+  let lo = 0, hi = to.length - 1; while (lo < to.length && to[lo] === from[lo]) lo++; while (hi > lo && to[hi] === from[hi]) hi--;
+  if (lo >= to.length) return false;
+  let t = by[from[lo]].start; for (let i = lo; i <= hi; i++) { by[to[i]].start = t; t += by[to[i]].dur; }
+  sortDay(d); return true;
+}
+function startFromNow(firstId) {
+  const d = getDay(viewKey()), now = logicalNow(), bed = span().b, t0 = Math.ceil(now.min / 5) * 5, windStart = bed - 120;
+  if (t0 >= windStart) { toast('It is already wind-down time. Nothing left to move.'); return; }
+  snap();
+  const first = d.blocks.findIndex(x => x.id === firstId);
+  const rest = d.blocks.filter((x, i) => i >= first && !x.done && !isFixed(x) && x.start < windStart), dropped = [];
+  const total = () => rest.reduce((a, x) => a + x.dur, 0);
+  const drop = pred => { for (let i = rest.length - 1; i >= 0 && total() > windStart - t0; i--) if (pred(rest[i])) dropped.push(rest.splice(i, 1)[0]); };
+  drop(x => /^(Open|Buffer)/.test(x.title)); ['fun', 'rest', 'people', 'move', 'write', 'work', 'food'].forEach(c => drop(x => x.cat === c));
+  let t = t0; rest.forEach(x => { x.start = t; t += x.dur; });
+  d.blocks = d.blocks.filter(x => !dropped.includes(x)); sortDay(d); ui.showPast = false; save(); render();
+  toastUndo(dropped.length ? 'Replanned from now. ' + dropped.length + (dropped.length === 1 ? ' block' : ' blocks') + ' no longer fit and ' + (dropped.length === 1 ? 'was' : 'were') + ' removed.' : 'Replanned from now.');
+}
 const idle = () => $('#sheet').hidden && !drag && !document.activeElement.matches('input,textarea,select');
 const buzz = n => { try { if (navigator.vibrate) navigator.vibrate(n); } catch (e) { /* not supported */ } };
 
@@ -202,7 +229,7 @@ function gcalLink(key, b, recur) {
 function ics(key, blocks, recur) {
   const e = s => String(s || '').replace(/([\\;,])/g, '\\$1').replace(/\n/g, '\\n');
   const now = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
-  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Tide//Daily rhythm//EN', 'CALSCALE:GREGORIAN'];
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Ebb//Daily rhythm//EN', 'CALSCALE:GREGORIAN'];
   blocks.forEach(b => {
     L.push('BEGIN:VEVENT', 'UID:' + b.id + '-' + key + '@tide', 'DTSTAMP:' + now, 'DTSTART:' + stamp(key, b.start), 'DTEND:' + stamp(key, b.start + Math.max(b.dur, 10)), 'SUMMARY:' + e(b.title));
     if (b.note) L.push('DESCRIPTION:' + e(b.note));
@@ -240,17 +267,16 @@ const dayNum = key => Math.round(keyDate(key).getTime() / 864e5);
 function photo(slot, key) { const list = PHOTOS[slot] || PHOTOS.dawn; return list[((dayNum(key || logicalNow().key) % list.length) + list.length) % list.length]; }
 function heroImg(key) { const now = logicalNow(); if (key !== now.key) return photo('dawn', key); const { b } = span(); return photo(now.min < 11 * 60 ? 'dawn' : now.min < 17 * 60 ? 'day' : now.min < b - 120 ? 'dusk' : 'night', key); }
 function hero(img, eyebrow, title, sub, extra, cls) {
-  return '<header class="hero ' + (cls || 'sub') + '" style="--img:url(img/' + img + '.webp)"><div class="hero-img"></div><div class="hero-top"><span class="mark">Tide</span>' + (extra && extra.top || '') + '</div><div class="hero-main"><div class="eyebrow">' + eyebrow + '</div><h1>' + title + '</h1>' + (sub ? '<p>' + sub + '</p>' : '') + (extra && extra.act || '') + '</div>' + (extra && extra.bottom || '') + '</header>';
+  return '<header class="hero ' + (cls || 'sub') + '" style="--img:url(img/' + img + '.webp)"><div class="hero-img"></div><div class="hero-top"><span class="mark">Ebb</span>' + (extra && extra.top || '') + '</div><div class="hero-main"><div class="eyebrow">' + eyebrow + '</div><h1>' + title + '</h1>' + (sub ? '<p>' + sub + '</p>' : '') + (extra && extra.act || '') + '</div>' + (extra && extra.bottom || '') + '</header>';
 }
 function blockHtml(b, now, isToday) {
-  const isNow = isToday && b.dur && now.min >= b.start && now.min < b.start + b.dur, open = ui.open === b.id, fixed = b.cat === 'sleep' && !b.dur;
+  const isNow = isToday && b.dur && now.min >= b.start && now.min < b.start + b.dur, fixed = isFixed(b);
   const past = isToday ? b.start + b.dur <= now.min && b.dur > 0 : false;
   return '<li class="blk cat-' + b.cat + (b.done ? ' done' : '') + (isNow ? ' now' : '') + (past ? ' past' : '') + (fixed ? ' fixed' : '') + '" data-id="' + b.id + '">' +
-    (fixed ? '<span class="grip none"></span>' : '<button class="grip" aria-label="Drag to reorder" title="Drag to reorder"><svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="4" r="1.5"/><circle cx="9" cy="4" r="1.5"/><circle cx="3" cy="10" r="1.5"/><circle cx="9" cy="10" r="1.5"/><circle cx="3" cy="16" r="1.5"/><circle cx="9" cy="16" r="1.5"/></g></svg></button>') +
+    (fixed ? '<span class="grip none"></span>' : '<button class="grip" aria-label="Drag to move"><svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="4" r="1.5"/><circle cx="9" cy="4" r="1.5"/><circle cx="3" cy="10" r="1.5"/><circle cx="9" cy="10" r="1.5"/><circle cx="3" cy="16" r="1.5"/><circle cx="9" cy="16" r="1.5"/></g></svg></button>') +
     '<div class="when">' + fmt(b.start) + '<span>' + (b.dur ? dur(b.dur) : '') + '</span></div>' +
-    '<button class="body" data-act="open" data-id="' + b.id + '" aria-expanded="' + open + '"><div class="cat">' + CATS[b.cat] + (isNow ? ' · now' : '') + '</div><div class="ttl">' + esc(b.title) + '</div>' + (b.note && (open || isNow) ? '<div class="note">' + esc(b.note) + '</div>' : '') + '</button>' +
-    '<button class="chk" data-act="done" data-id="' + b.id + '" aria-label="' + (b.done ? 'Mark not done' : 'Mark done') + '"><i>' + (b.done ? '✓' : '') + '</i></button>' +
-    (open ? '<div class="acts">' + [['swap', 'Swap'], ['edit', 'Edit'], ['earlier', '−15 min'], ['later', '+15 min'], ['cal', 'Add to calendar'], ['del', 'Remove']].map(a => '<button class="btn sm' + (a[0] === 'del' ? ' danger' : '') + '" data-act="' + a[0] + '" data-id="' + b.id + '">' + a[1] + '</button>').join('') + '</div>' : '') + '</li>';
+    '<button class="body" data-act="open" data-id="' + b.id + '"><div class="cat">' + CATS[b.cat] + (isNow ? ' · now' : '') + '</div><div class="ttl">' + esc(b.title) + '</div>' + (b.note && isNow ? '<div class="note">' + esc(b.note) + '</div>' : '') + '</button>' +
+    '<button class="chk" data-act="done" data-id="' + b.id + '" aria-label="' + (b.done ? 'Mark not done' : 'Mark done') + '"><i>' + (b.done ? '✓' : '') + '</i></button></li>';
 }
 function anchorsHtml(d) {
   const n = streak();
@@ -263,24 +289,26 @@ function renderToday() {
   const date = keyDate(key).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
   const cur = isToday && d.blocks.find(b => b.dur && now.min >= b.start && now.min < b.start + b.dur);
   const nxt = isToday && d.blocks.find(b => b.start > now.min);
-  const doneN = d.blocks.filter(b => b.done).length;
-  const { w, b } = span();
+  const doneN = d.blocks.filter(b => b.done).length, bed = span().b;
   const tasks = state.tasks.filter(t => !t.done || t.doneDay === now.key);
   const short = keyDate(key).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-  const label = ui.dayOffset === 1 ? 'Tomorrow' : ui.dayOffset === -1 ? 'Yesterday' : 'Day view';
-  const eyebrow = !isToday ? label + ' · ' + d.blocks.length + ' blocks' : cur ? 'Now · until ' + fmt(cur.start + cur.dur) : nxt ? 'Next · ' + fmt(nxt.start) : 'Day complete';
-  const title = !isToday ? esc(date) : cur ? esc(cur.title) : nxt ? esc(nxt.title) : '<em>Rest.</em>';
-  const sub = !isToday ? '' : cur && nxt ? 'Then ' + esc(nxt.title.charAt(0).toLowerCase() + nxt.title.slice(1)) + ' at ' + fmt(nxt.start) + '.' : !cur && !nxt ? 'Nothing left to do today. Phone across the room.' : '';
-  const act = cur ? '<div class="row hero-act">' + (cur.done ? '<span class="pill">Done ✓</span>' : '<button class="btn light" data-act="done" data-id="' + cur.id + '">Mark done</button>') + '<button class="btn ghost" data-act="swap" data-id="' + cur.id + '">Not feeling it? Swap</button></div>' : '';
+  const label = ui.dayOffset === 1 ? 'Tomorrow' : ui.dayOffset === -1 ? 'Yesterday' : 'Another day';
+  const eyebrow = !isToday ? label : cur ? 'Now, until ' + fmt(cur.start + cur.dur) : nxt ? 'Next, at ' + fmt(nxt.start) : 'Day complete';
+  const title = !isToday ? esc(date) : cur ? esc(cur.title) : nxt ? esc(nxt.title) : 'Rest.';
+  const act = cur ? '<div class="row hero-act">' + (cur.done ? '<span class="pill">Done ✓</span>' : '<button class="btn light" data-act="done" data-id="' + cur.id + '">Done</button>') + '<button class="btn ghost" data-act="open" data-id="' + cur.id + '">Change</button></div>' : '';
   const gl = state.g.connected ? '<div class="gline"><span>Google · ' + esc(G.status || (state.g.last ? 'synced ' + new Date(state.g.last).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : 'not synced yet')) + '</span><button class="btn sm" data-act="g-sync">Sync now</button></div>' : '';
   const past = isToday && !ui.showPast ? d.blocks.filter(x => x.dur > 0 && x.start + x.dur <= now.min) : [];
   const shown = d.blocks.filter(x => !past.includes(x));
-  return hero(heroImg(key), eyebrow, title, sub, { top: '<div class="daynav"><button data-act="day" data-n="-1" aria-label="Previous day">‹</button><button data-act="day" data-n="0" aria-label="Back to today">' + esc(short) + '</button><button data-act="day" data-n="1" aria-label="Next day">›</button></div>', act,
-    bottom: '<div class="hero-tide">' + tideSvg(key) + '<div class="ends"><span>Wake ' + fmt(w) + '</span><span>' + doneN + ' / ' + d.blocks.length + ' done</span><span>Lights out ' + fmt(b) + '</span></div></div>' }, 'full') + '<!--b-->' + gl +
+  const lastEnd = Math.max(0, ...d.blocks.filter(x => !isFixed(x)).map(x => x.start + x.dur)), over = lastEnd - bed;
+  const rows = shown.map(x => (isFixed(x) && over > 0 ? '<li class="warn">This runs ' + dur(over) + ' past lights out. Shorten or remove something, or tap Adjust day.</li>' : '') + blockHtml(x, now, isToday)).join('');
+  return '<header class="hero top" style="--img:url(img/' + heroImg(key) + '.webp)"><div class="hero-img"></div><div class="hero-top"><span class="mark">Ebb</span><div class="daynav"><button data-act="day" data-n="-1" aria-label="Previous day">‹</button><button data-act="day" data-n="0" aria-label="Back to today">' + esc(short) + '</button><button data-act="day" data-n="1" aria-label="Next day">›</button></div></div>' +
+    '<div class="hero-main"><div class="eyebrow">' + eyebrow + '</div><h1>' + title + '</h1>' + act + '</div>' +
+    '<div class="hero-tide"><div class="meter light"><i style="width:' + (d.blocks.length ? doneN / d.blocks.length * 100 : 0) + '%"></i></div><div class="ends"><span>' + doneN + ' of ' + d.blocks.length + ' done</span><span>Lights out ' + fmt(bed) + '</span></div></div></header><!--b-->' + gl +
+    '<section class="stack day"><div class="row between"><h2>' + (isToday ? 'Today' : label) + '</h2><div class="row"><button class="btn sm" data-act="adjust">Adjust day</button><button class="btn sm" data-act="add-block">Add</button></div></div>' +
+    '<ul class="blocks">' + (past.length ? '<li class="earlier"><button data-act="show-past">Earlier: ' + past.length + ' blocks, ' + past.filter(x => x.done).length + ' done. Show</button></li>' : isToday && ui.showPast ? '<li class="earlier"><button data-act="show-past">Hide earlier blocks</button></li>' : '') + rows + '</ul>' +
+    '<p class="small muted hint">Tap a block to change it. Hold the dots and drag to move it.</p></section>' +
     (isToday ? anchorsHtml(d) : '') +
     '<section class="stack"><div class="eyebrow">How is today, honestly?</div><div class="moods">' + ['Heavy', 'Low', 'Okay', 'Good', 'Light'].map((m, i) => '<button data-act="mood" data-n="' + (i + 1) + '" class="' + (d.mood === i + 1 ? 'on' : '') + '">' + m + '</button>').join('') + '</div></section>' +
-    '<section class="stack"><div class="row between"><h2>The day</h2><div class="row"><button class="btn sm" data-act="go" data-v="plan">Plan</button><button class="btn sm" data-act="add-block">Add</button><button class="btn sm" data-act="day-menu">Calendar</button></div></div><p class="small muted">Hold the dots on the left and drag to reorder. Times adjust themselves.</p>' +
-    '<ul class="blocks">' + (past.length ? '<li class="earlier"><button data-act="show-past">Earlier today · ' + past.length + ' blocks, ' + past.filter(x => x.done).length + ' done · show</button></li>' : isToday && ui.showPast ? '<li class="earlier"><button data-act="show-past">Hide earlier blocks</button></li>' : '') + shown.map(x => blockHtml(x, now, isToday)).join('') + '</ul></section>' +
     '<section class="card"><h2>Tasks</h2><form class="addrow" data-form="task"><input type="text" id="taskIn" placeholder="Add a task" autocomplete="off"><button class="btn primary">Add</button></form>' +
     (tasks.length ? '<ul class="list">' + tasks.map(t => '<li><input type="checkbox" data-act="task" data-id="' + t.id + '"' + (t.done ? ' checked' : '') + ' aria-label="Done"><span class="txt' + (t.done ? ' done' : '') + '">' + esc(t.text) + '</span><button class="x" data-act="task-del" data-id="' + t.id + '" aria-label="Delete task">×</button></li>').join('') + '</ul>' : '<p class="muted small">Nothing open. Add what would make today enough, three at most.</p>') + '</section>';
 }
@@ -306,7 +334,7 @@ function renderProgress() {
     '<section class="card"><h2>Last four weeks</h2><div class="heat">' + cells + '</div><p class="small muted">Each square is a day. Darker means more of the plan done. A ring marks today. Blank days are just blank, not failures.</p></section>' +
     '<section class="card"><h2>Mood</h2>' + moodBars(14) + '<p class="small muted">Fourteen days, from the check on Today. Look at the direction, not single days.</p></section>' +
     '<section class="card"><h2>Waves</h2><div class="bars labelled">' + weeks.map((c, i) => '<div><i class="' + (c ? '' : 'none') + '" style="height:' + (c ? c / maxW * 100 : 4) + '%"></i><span>' + c + '</span></div>').join('') + '</div><p class="small muted">Per week, oldest to newest. ' + (state.waves.length < 2 ? 'Log waves with the Wave hit button and the pattern shows up here.' : wThis < wLast ? 'Fewer this week than last. It is easing.' : wThis === wLast ? 'Level with last week. Each one still ended.' : 'More this week than last. That happens. Each one still ended.') + '</p></section>' +
-    '<section class="card"><h2>Body</h2>' + (NATIVE ? (!NATIVE.hasStepSensor() ? '<p class="small muted">This phone has no step-counter sensor, so type your steps in.</p>' : NATIVE.stepsAllowed() ? '<p class="small muted">Steps are counted by your phone\'s step sensor and fill in on their own. Counting starts from the moment you allowed it. Screen time and sleep still need typing in: Android does not let apps read Digital Wellbeing.</p>' : '<p class="small muted">Allow physical-activity access and Tide counts your steps on its own.</p><div class="row"><button class="btn primary" data-act="ask-steps">Allow step counting</button></div>') : '<p class="small muted">Tide cannot read your phone\'s step counter or Digital Wellbeing; no website can. Copy today\'s numbers from Shelf and from Settings → Digital Wellbeing once in the evening. It takes ten seconds.</p>') +
+    '<section class="card"><h2>Body</h2>' + (NATIVE ? (!NATIVE.hasStepSensor() ? '<p class="small muted">This phone has no step-counter sensor, so type your steps in.</p>' : NATIVE.stepsAllowed() ? '<p class="small muted">Steps are counted by your phone\'s step sensor and fill in on their own. Counting starts from the moment you allowed it. Screen time and sleep still need typing in: Android does not let apps read Digital Wellbeing.</p>' : '<p class="small muted">Allow physical-activity access and Ebb counts your steps on its own.</p><div class="row"><button class="btn primary" data-act="ask-steps">Allow step counting</button></div>') : '<p class="small muted">Ebb cannot read your phone\'s step counter or Digital Wellbeing; no website can. Copy today\'s numbers from Shelf and from Settings → Digital Wellbeing once in the evening. It takes ten seconds.</p>') +
     '<div class="grid3"><label class="f">Steps<input type="number" id="logSteps" data-log="steps" inputmode="numeric" min="0" max="100000" value="' + (lg.steps || '') + '" placeholder="' + goal + '"></label><label class="f">Screen hours<input type="number" id="logScreen" data-log="screen" inputmode="decimal" min="0" max="24" step="0.25" value="' + (lg.screen || '') + '" placeholder="3.5"></label><label class="f">Sleep hours<input type="number" id="logSleep" data-log="sleep" inputmode="decimal" min="0" max="16" step="0.25" value="' + (lg.sleep || '') + '" placeholder="7.5"></label></div>' +
     '<div class="bars labelled">' + logs.map(l => '<div><i class="' + (l.steps ? '' : 'none') + (l.steps >= goal ? ' hit' : '') + '" style="height:' + (l.steps ? Math.min(100, l.steps / goal * 100) : 4) + '%"></i><span>' + (l.steps ? (l.steps / 1000).toFixed(1) + 'k' : '·') + '</span></div>').join('') + '</div>' +
     '<div class="stat"><div><b>' + (avg('steps') ? Math.round(avg('steps') / 100) / 10 + '<small>k</small>' : '–') + '</b><span>steps a day, 7-day average</span></div><div><b>' + (avg('screen') ? avg('screen').toFixed(1) + '<small>h</small>' : '–') + '</b><span>screen time a day</span></div><div><b>' + (avg('sleep') ? avg('sleep').toFixed(1) + '<small>h</small>' : '–') + '</b><span>sleep a night</span></div></div></section>' +
@@ -325,21 +353,20 @@ function renderPlan() {
     '<section class="card"><h2>Anchors</h2><p class="small muted">The few things that make a day count even when everything else slips. Rename them to fit you.</p>' + s.anchors.map((a, i) => '<label class="f">Anchor ' + (i + 1) + '<input type="text" id="anchor' + i + '" data-anchor="' + i + '" value="' + esc(a.label) + '" maxlength="40"></label>').join('') + '</section>' +
     '<section class="card"><h2>Apply</h2><p class="small muted">Changing settings does not touch days you already edited. Rebuild when you want a fresh plan.</p><div class="row"><button class="btn primary" data-act="rebuild" data-n="0">Rebuild today</button><button class="btn" data-act="rebuild" data-n="1">Rebuild tomorrow</button></div>' +
     '<div class="row"><button class="btn" data-act="save-template">Save today as my default</button>' + (state.template ? '<button class="btn danger" data-act="clear-template">Clear my default</button>' : '') + '</div><p class="small muted">' + (state.template ? 'New days copy your saved default.' : 'New days are built from the settings above.') + '</p></section>' +
-    '<section class="card"><h2>Reminders</h2><label class="tog"><input type="checkbox" data-act="notify"' + (s.notify ? ' checked' : '') + '> Notify me when a block starts</label><p class="small muted">' + (NATIVE ? 'The app notifies you at the start of each block, even when it is closed. Android may delay a reminder by a few minutes to save battery.' : 'Browser notifications only fire while Tide is open or recently used. For reminders that always fire, open Today, tap Calendar and share, and add the day to your phone calendar. Each event carries its own alert.') + '</p></section>';
+    '<section class="card"><h2>Reminders</h2><label class="tog"><input type="checkbox" data-act="notify"' + (s.notify ? ' checked' : '') + '> Notify me when a block starts</label><p class="small muted">' + (NATIVE ? 'The app notifies you at the start of each block, even when it is closed. Android may delay a reminder by a few minutes to save battery.' : 'Browser notifications only fire while Ebb is open or recently used. For reminders that always fire, open Today, tap Calendar and share, and add the day to your phone calendar. Each event carries its own alert.') + '</p></section>';
 }
 
 function renderJournal() {
-  const p = PROMPTS[ui.prompt], now = logicalNow();
-  const last14 = []; for (let i = 13; i >= 0; i--) { const d = state.days[addDays(now.key, -i)]; last14.push(d ? d.mood : 0); }
-  const weekAgo = Date.now() - 7 * 864e5, moods = last14.slice(7).filter(Boolean);
+  const p = PROMPTS[ui.prompt], hand = state.settings.hand !== false;
+  const stamp2 = ts => new Date(ts).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
   return hero(photo('journal'), 'Journal', 'Write it <em>out</em>', 'On the page it stops circling.') + '<!--b-->' +
-    '<section class="card"><div class="row">' + PROMPTS.map((x, i) => '<button class="chip' + (ui.prompt === i ? ' on' : '') + '" data-act="prompt" data-n="' + i + '">' + x[0] + '</button>').join('') + '</div>' +
-    '<textarea id="jText" placeholder="Start anywhere.">' + esc(draft() || p[1]) + '</textarea>' +
-    '<div class="row between"><div class="row"><span class="small muted">Mood</span>' + [1, 2, 3, 4, 5].map(n => '<button class="chip' + (ui.jmood === n ? ' on' : '') + '" data-act="jmood" data-n="' + n + '">' + n + '</button>').join('') + '</div><div class="row">' + (window.SpeechRecognition || window.webkitSpeechRecognition ? '<button class="btn sm" data-act="dictate">Dictate</button>' : '') + '<button class="btn primary" data-act="jsave">Save entry</button></div></div></section>' +
-    '<section class="card"><h2>Last two weeks</h2>' + moodBars(14) +
-    '<div class="stat"><div><b>' + state.journal.filter(j => j.ts > weekAgo).length + '</b><span>entries this week</span></div><div><b>' + (moods.length ? (moods.reduce((a, c) => a + c, 0) / moods.length).toFixed(1) : '–') + '</b><span>average mood, 7 days</span></div><div><b>' + state.waves.filter(x => x.ts > weekAgo).length + '</b><span>waves this week</span></div></div></section>' +
-    '<section class="card"><h2>Entries</h2>' + (state.journal.length ? '<ul class="list">' + state.journal.slice().reverse().map(j => '<li><div class="txt"><span class="eyebrow">' + esc(new Date(j.ts).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })) + ' · ' + esc(j.prompt) + (j.mood ? ' · mood ' + j.mood : '') + '</span>\n' + esc(j.text) + '</div><button class="x" data-act="jdel" data-id="' + j.id + '" aria-label="Delete entry">×</button></li>').join('') + '</ul>' : '<p class="muted small">No entries yet. The worry slot is a good first one: 15 minutes, everything on the page, then stop.</p>') + '</section>';
+    '<section class="card"><div class="chips-scroll">' + PROMPTS.map((x, i) => '<button class="chip' + (ui.prompt === i ? ' on' : '') + '" data-act="prompt" data-n="' + i + '">' + x[0] + '</button>').join('') + '</div>' +
+    '<div class="notebook' + (hand ? ' hand' : '') + '"><div class="nb-date">' + esc(stamp2(Date.now())) + '</div><textarea id="jText" class="paper" placeholder="Start anywhere." spellcheck="false">' + esc(draft() || p[1]) + '</textarea></div>' +
+    '<div class="row between"><div class="row"><span class="small muted">Mood</span>' + [1, 2, 3, 4, 5].map(n => '<button class="chip dot' + (ui.jmood === n ? ' on' : '') + '" data-act="jmood" data-n="' + n + '">' + n + '</button>').join('') + '</div><button class="btn primary" data-act="jsave">Keep this page</button></div>' +
+    '<div class="row"><button class="btn sm quiet" data-act="hand">' + (hand ? 'Switch to typed letters' : 'Switch to handwriting') + '</button>' + (window.SpeechRecognition || window.webkitSpeechRecognition ? '<button class="btn sm quiet" data-act="dictate">Dictate</button>' : '') + '</div></section>' +
+    '<section class="card"><h2>Earlier pages</h2>' + (state.journal.length ? state.journal.slice().reverse().map(j => '<article class="notebook page' + (hand ? ' hand' : '') + '"><div class="nb-date">' + esc(stamp2(j.ts)) + ' · ' + esc(j.prompt) + (j.mood ? ' · mood ' + j.mood : '') + '<button class="x" data-act="jdel" data-id="' + j.id + '" aria-label="Delete this page">×</button></div><div class="paper">' + esc(j.text) + '</div></article>').join('') : '<p class="muted small">No pages yet. The worry slot is a good first one: 15 minutes, everything on the page, then stop.</p>') + '</section>';
 }
+function growPaper() { const t = $('#jText'); if (t) { t.style.height = 'auto'; t.style.height = Math.max(238, t.scrollHeight + 2) + 'px'; } }
 const draft = () => { try { return sessionStorage.getItem('tide.draft') || ''; } catch (e) { return ''; } };
 const setDraft = v => { try { sessionStorage.setItem('tide.draft', v); } catch (e) { /* ignore */ } };
 
@@ -373,23 +400,23 @@ function renderMore() {
   const today = getDay(logicalNow().key), n = ncDays();
   return hero(photo('more'), 'More', 'Tools and <em>notes</em>', '') + '<!--b-->' +
     '<section class="card"><h2>Shape your day</h2><p class="small muted">Wake and lights-out times, day type, focus blocks, anchors, reminders.</p><div class="row"><button class="btn primary" data-act="go" data-v="plan">Open Plan</button></div></section>' +
-    (NATIVE ? '<section class="card"><h2>Widgets</h2><ul class="plain small"><li>Long-press an empty spot on your home screen → Widgets → Tide.</li><li><b>Now and next</b> shows the current block with a Done button.</li><li><b>Steps and streak</b> shows today\'s steps against your goal.</li><li><b>Wave hit</b> is a one-tap shortcut to the calm steps.</li><li>On OnePlus, also allow Tide to run in the background (Settings → Battery → Tide → Allow background activity) so widgets and reminders stay current.</li></ul></section>' : '') +
-    (NATIVE ? '' : '<section class="card"><h2>Android app</h2><p class="small muted">A native version with real home-screen widgets, automatic step counting and reminders that fire when the app is closed.</p><div class="row"><a class="btn primary" href="https://github.com/brycisliova/self-guide/releases/download/android-latest/Tide.apk" rel="noopener">Download Tide.apk</a></div><p class="small muted">It keeps its own data. Move yours across with Backup below: download here, restore there.</p></section>') +
-    (NATIVE ? '' : '<section class="card"><h2>Put Tide on your home screen</h2>' + (installEvt ? '<div class="row"><button class="btn primary" data-act="install">Install Tide</button></div>' : '') +
-    '<ul class="plain small"><li><b>OnePlus / Android:</b> open this page in Chrome → ⋮ menu → Add to Home screen → Install. Long-press the Tide icon afterwards for shortcuts to Wave hit, Journal, Breathing and Progress.</li><li><b>Mac:</b> in Chrome, ⋮ → Cast, save and share → Install page as app. In Safari, File → Add to Dock.</li><li><b>Widgets:</b> a web app cannot place its own widget. Connect Google below, then add the Google Calendar and Google Tasks widgets to your home screen or Shelf: they show your Tide day and your Tide tasks, and you can tick tasks from the widget.</li></ul></section>') +
+    (NATIVE ? '<section class="card"><h2>Widgets</h2><ul class="plain small"><li>Long-press an empty spot on your home screen → Widgets → Ebb.</li><li><b>Now and next</b> shows the current block with a Done button.</li><li><b>Steps and streak</b> shows today\'s steps against your goal.</li><li><b>Wave hit</b> is a one-tap shortcut to the calm steps.</li><li>On OnePlus, also allow Ebb to run in the background (Settings → Battery → Ebb → Allow background activity) so widgets and reminders stay current.</li></ul></section>' : '') +
+    (NATIVE ? '' : '<section class="card"><h2>Android app</h2><p class="small muted">A native version with real home-screen widgets, automatic step counting and reminders that fire when the app is closed.</p><div class="row"><a class="btn primary" href="https://github.com/brycisliova/self-guide/releases/download/android-latest/Ebb.apk" rel="noopener">Download Ebb.apk</a></div><p class="small muted">It keeps its own data. Move yours across with Backup below: download here, restore there.</p></section>') +
+    (NATIVE ? '' : '<section class="card"><h2>Put Ebb on your home screen</h2>' + (installEvt ? '<div class="row"><button class="btn primary" data-act="install">Install Ebb</button></div>' : '') +
+    '<ul class="plain small"><li><b>OnePlus / Android:</b> open this page in Chrome → ⋮ menu → Add to Home screen → Install. Long-press the Ebb icon afterwards for shortcuts to Wave hit, Journal, Breathing and Progress.</li><li><b>Mac:</b> in Chrome, ⋮ → Cast, save and share → Install page as app. In Safari, File → Add to Dock.</li><li><b>Widgets:</b> a web app cannot place its own widget. Connect Google below, then add the Google Calendar and Google Tasks widgets to your home screen or Shelf: they show your Ebb day and your Ebb tasks, and you can tick tasks from the widget.</li></ul></section>') +
     '<section class="card"><h2>What to take in, what to skip</h2><h3>Take in</h3><ul class="plain">' + CONSUME.yes.map(x => '<li>' + x + '</li>').join('') + '</ul><h3>Skip</h3><ul class="plain">' + CONSUME.no.map(x => '<li>' + x + '</li>').join('') + '</ul></section>' +
     '<section class="card"><h2>Library</h2><p class="small muted">Key ideas in plain words, with room for your own takeaways.</p>' + LIBRARY.map(l => '<details' + (ui.libOpen === l.id ? ' open' : '') + ' data-lib="' + l.id + '"><summary>' + esc(l.title) + '</summary><div><ul class="plain">' + l.points.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' + (l.link ? '<a href="' + l.link + '" target="_blank" rel="noopener">' + esc(l.linkText) + '</a>' : '') + '<label class="f">My takeaways<textarea id="note-' + l.id + '" data-note="' + l.id + '" placeholder="What I want to remember and use">' + esc(state.notes[l.id] || '') + '</textarea></label></div></details>').join('') + '</section>' +
     '<section class="card"><h2>Quote notebook</h2><form class="stack" data-form="quote"><input type="text" id="quoteIn" placeholder="A line worth keeping" autocomplete="off"><div class="addrow"><input type="text" id="quoteSrc" placeholder="Who said it (optional)" autocomplete="off"><button class="btn primary">Keep</button></div></form>' +
     (state.quotes.length ? '<ul class="list">' + state.quotes.slice().reverse().map(q => '<li><div class="txt"><span class="quote">' + esc(q.text) + '</span>' + (q.src ? '\n<span class="eyebrow">' + esc(q.src) + '</span>' : '') + '</div><button class="x" data-act="quote-del" data-id="' + q.id + '" aria-label="Delete quote">×</button></li>').join('') + '</ul>' : '') + '</section>' +
-    '<section class="card"><h2>Google Calendar and Tasks</h2><p class="small muted">Connect once and Tide keeps a calendar named Tide (today and tomorrow, with an alert at each block) and a task list named Tide in your Google account. Tasks sync both ways: tick one in Google Tasks and it is ticked here.</p>' +
+    '<section class="card"><h2>Google Calendar and Tasks</h2><p class="small muted">Connect once and Ebb keeps a calendar named Ebb (today and tomorrow, with an alert at each block) and a task list named Ebb in your Google account. Tasks sync both ways: tick one in Google Tasks and it is ticked here.</p>' +
     (NATIVE ? '<p class="small"><b>Not available inside the Android app:</b> Google blocks its sign-in in embedded app screens. Here, use Add to phone calendar on any block, or the calendar file for a whole day.</p>' : '') +
     (NATIVE ? '' : state.g.connected ? '<div class="row"><button class="btn primary" data-act="g-sync">Sync now</button><button class="btn danger" data-act="g-off">Disconnect</button></div>' : '<details><summary>One-time setup, about five minutes</summary><div><ol class="steps"><li>Open console.cloud.google.com and create a project.</li><li>APIs and Services → Library: enable <b>Google Calendar API</b> and <b>Google Tasks API</b>.</li><li>OAuth consent screen: choose External, fill in the app name and your email, and add your own Gmail address under Test users.</li><li>Credentials → Create credentials → OAuth client ID → Web application. Under Authorised JavaScript origins add <b>' + esc(location.origin) + '</b>.</li><li>Copy the client ID and paste it below.</li></ol></div></details><label class="f">Google client ID<input type="text" id="gClient" value="' + esc(state.g.clientId) + '" placeholder="…apps.googleusercontent.com" autocomplete="off"></label><div class="row"><button class="btn primary" data-act="g-connect">Connect Google</button></div>') +
     '<p class="small muted" id="gStatus">' + esc(G.status || (state.g.connected ? (state.g.last ? 'Last synced ' + new Date(state.g.last).toLocaleString() : 'Connected.') + ' Google asks you to confirm again about once an hour; tap Sync now when it does.' : 'Not connected. Without it, use Calendar and share on the Today screen to add a day to any calendar.')) + '</p></section>' +
-    '<section class="card"><h2>Sync across devices</h2><p class="small muted">Optional. Tide can keep a copy of your data in a secret GitHub gist on your own account and pull it on your other devices. Create a token at github.com → Settings → Developer settings → Fine-grained tokens with only the Gists permission (read and write), then paste it on each device. A secret gist is unlisted, but anyone who has its link can read it, so never share that link.</p>' +
+    '<section class="card"><h2>Sync across devices</h2><p class="small muted">Optional. Ebb can keep a copy of your data in a secret GitHub gist on your own account and pull it on your other devices. Create a token at github.com → Settings → Developer settings → Fine-grained tokens with only the Gists permission (read and write), then paste it on each device. A secret gist is unlisted, but anyone who has its link can read it, so never share that link.</p>' +
     '<label class="f">GitHub token<input type="password" id="syncToken" value="' + esc(sync.token) + '" placeholder="github_pat_…" autocomplete="off"></label><div class="row"><button class="btn primary" data-act="sync-save">' + (sync.token ? 'Sync now' : 'Turn on sync') + '</button>' + (sync.token ? '<button class="btn danger" data-act="sync-off">Turn off on this device</button>' : '') + '</div><p class="small muted" id="syncStatus">' + esc(sync.status || (sync.last ? 'Last synced ' + new Date(sync.last).toLocaleString() : 'Not syncing. Data lives on this device only.')) + '</p></section>' +
     '<section class="card"><h2>Backup</h2><p class="small muted">Download everything as one file, or restore from a file.</p><div class="row"><button class="btn" data-act="export">Download backup</button><label class="btn">Restore from file<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>' +
-    '<section class="card"><h2>Privacy and safety</h2><ul class="plain small"><li>Everything you write stays in this browser on this device. The public code on GitHub contains none of it.</li><li>The page only runs its own code and only talks to Google and GitHub, and only if you connect them. A browser rule (content security policy) enforces that.</li><li>A website cannot read your files, messages, or other apps. Installing Tide does not change that.</li><li>Keep two-factor sign-in on for GitHub and Google. Those accounts are what actually protect the repo and your synced copy.</li></ul>' +
-    '<h3>App lock</h3>' + (state.settings.lock ? '<p class="small muted">A PIN is asked when Tide opens or returns after a few minutes away.</p><div class="row"><button class="btn danger" data-act="lock-off">Remove PIN</button></div>' : '<p class="small muted">Ask for a PIN when Tide opens, so someone holding your phone cannot read your journal. It is a screen lock, not encryption.</p><form class="addrow" data-form="lock"><input type="password" id="pinNew" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" placeholder="4 to 8 digits" autocomplete="new-password" required><button class="btn primary">Set PIN</button></form>') + '</section>' +
+    '<section class="card"><h2>Privacy and safety</h2><ul class="plain small"><li>Everything you write stays in this browser on this device. The public code on GitHub contains none of it.</li><li>The page only runs its own code and only talks to Google and GitHub, and only if you connect them. A browser rule (content security policy) enforces that.</li><li>A website cannot read your files, messages, or other apps. Installing Ebb does not change that.</li><li>Keep two-factor sign-in on for GitHub and Google. Those accounts are what actually protect the repo and your synced copy.</li></ul>' +
+    '<h3>App lock</h3>' + (state.settings.lock ? '<p class="small muted">A PIN is asked when Ebb opens or returns after a few minutes away.</p><div class="row"><button class="btn danger" data-act="lock-off">Remove PIN</button></div>' : '<p class="small muted">Ask for a PIN when Ebb opens, so someone holding your phone cannot read your journal. It is a screen lock, not encryption.</p><form class="addrow" data-form="lock"><input type="password" id="pinNew" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" placeholder="4 to 8 digits" autocomplete="new-password" required><button class="btn primary">Set PIN</button></form>') + '</section>' +
     '<section class="card"><h2>Appearance</h2><div class="row">' + [['auto', 'Match phone'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => '<button class="chip' + (state.settings.theme === k ? ' on' : '') + '" data-act="theme" data-v="' + k + '">' + l + '</button>').join('') + '</div></section>' +
     '<section class="card"><h2>When it is too heavy</h2><p>Tele-MANAS, India\'s free mental health line, answers day and night: <b>14416</b>.</p><p class="small muted">Your campus counselling or wellness centre is free and sees this often. If the sadness stays heavy for weeks, or you feel unsafe, talk to a person today. An app is not enough for that.</p></section>' +
     '<section class="card"><h3>Photographs</h3><div class="credits">' + Object.values(PHOTO_META).map(c => '<span><a href="' + esc(c[3]) + '" target="_blank" rel="noopener">' + esc(c[0]) + '</a> by ' + esc(c[1]) + ', ' + esc(c[2]) + ', resized. Wikimedia Commons.</span>').join('') + '</div></section>';
@@ -397,23 +424,43 @@ function renderMore() {
 
 function render() {
   const v = $('#view'); stopPacer();
-  v.classList.toggle('enter', render.last !== ui.tab + ui.dayOffset); render.last = ui.tab + ui.dayOffset;
+  v.classList.toggle('enter', render.last !== ui.tab); render.last = ui.tab;
   v.innerHTML = { today: renderToday, plan: renderPlan, journal: renderJournal, calm: renderCalm, progress: renderProgress, more: renderMore }[ui.tab]().replace('<!--b-->', '<div class="wrap">') + '</div>';
   document.querySelectorAll('.tabs button').forEach(b => { b.classList.toggle('on', b.dataset.tab === ui.tab); b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'); });
   const th = state.settings.theme; if (th === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', th);
   if (ui.tab === 'calm' && urgeEnd) { tickUrge(); }
+  if (ui.tab === 'journal') growPaper();
 }
 
 // ---------- sheets ----------
-function editSheet(b) {
-  const isNew = !b; b = b || { id: '', start: Math.ceil(logicalNow().min / 15) * 15, dur: 30, cat: 'fun', title: '', note: '' };
-  openSheet('<h2>' + (isNew ? 'Add a block' : 'Edit block') + '</h2><form class="stack" data-form="block" data-id="' + b.id + '"><label class="f">What<input type="text" id="bTitle" value="' + esc(b.title) + '" required></label><label class="f">Note<input type="text" id="bNote" value="' + esc(b.note) + '"></label>' +
-    '<div class="grid2"><label class="f">Starts<input type="time" id="bStart" value="' + toHHMM(b.start) + '" required></label><label class="f">Minutes<input type="number" id="bDur" value="' + b.dur + '" min="0" max="600" step="5" inputmode="numeric" required></label></div>' +
-    '<label class="f">Kind<select id="bCat">' + Object.entries(CATS).map(([k, n]) => '<option value="' + k + '"' + (b.cat === k ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></label><div class="row"><button class="btn primary">Save</button><button type="button" class="btn" data-act="close-sheet">Cancel</button></div></form>');
+const shuffle = a => a.map(x => [Math.random(), x]).sort((x, y) => x[0] - y[0]).map(x => x[1]);
+function blockSheet(b, fresh) {
+  if (!b) return; const fixed = isFixed(b), card = $('.sheet-card'), keep = ui.sheetBlock === b.id && !$('#sheet').hidden ? card.scrollTop : 0;
+  if (fresh || blockSheet.forId !== b.id + b.cat) { blockSheet.forId = b.id + b.cat; blockSheet.ideas = shuffle((ALT[b.cat] || []).filter(a => a[0] !== b.title)).slice(0, 3); }
+  ui.sheetBlock = b.id;
+  const lens = [15, 30, 45, 60, 90, 120]; if (b.dur && !lens.includes(b.dur)) lens.push(b.dur); lens.sort((x, y) => x - y);
+  openSheet('<div class="eyebrow">' + fmt(b.start) + (b.dur ? ' to ' + fmt(b.start + b.dur) : '') + '</div>' +
+    '<input type="text" class="title-in" id="bsTitle" data-bs="title" value="' + esc(b.title) + '" aria-label="What" maxlength="80">' +
+    '<input type="text" id="bsNote" data-bs="note" value="' + esc(b.note) + '" placeholder="Add a note" aria-label="Note" maxlength="160">' +
+    (fixed ? '<p class="small muted">Lights out is the fixed end of the day. Change the time in Plan.</p>' :
+      '<div class="field"><span>Starts</span><div class="stepper"><button data-act="bs-start" data-n="-15" aria-label="15 minutes earlier">−</button><b>' + fmt(b.start) + '</b><button data-act="bs-start" data-n="15" aria-label="15 minutes later">+</button></div></div>' +
+      '<div class="field"><span>Length</span><div class="chips-scroll">' + lens.map(n => '<button class="chip' + (b.dur === n ? ' on' : '') + '" data-act="bs-dur" data-n="' + n + '">' + dur(n) + '</button>').join('') + '</div></div>' +
+      '<p class="small muted">Whatever comes after moves along with it.</p>' +
+      '<div class="field col"><span>Rather do something else?</span>' + blockSheet.ideas.map((a, i) => '<button class="opt" data-act="bs-idea" data-n="' + i + '"><b>' + esc(a[0]) + '</b>' + (a[1] ? '<span>' + esc(a[1]) + '</span>' : '') + '</button>').join('') +
+      '<div class="row"><button class="btn sm" data-act="bs-more">Show other ideas</button><select id="bsCat" data-bs="cat" aria-label="Kind of block">' + Object.entries(CATS).filter(([k]) => k !== 'sleep').map(([k, n]) => '<option value="' + k + '"' + (b.cat === k ? ' selected' : '') + '>' + n + ' ideas</option>').join('') + '</select></div></div>' +
+      '<div class="row"><button class="btn sm" data-act="bs-move" data-n="-1">Move earlier</button><button class="btn sm" data-act="bs-move" data-n="1">Move later</button><button class="btn sm" data-act="cal" data-id="' + b.id + '">Calendar</button><button class="btn sm danger" data-act="del" data-id="' + b.id + '">Remove</button></div>') +
+    '<button class="btn primary" data-act="close-sheet">Done</button>');
+  card.scrollTop = keep;
 }
-function swapSheet(b) {
-  openSheet('<h2>Swap "' + esc(b.title) + '"</h2><div class="row">' + Object.entries(CATS).filter(([k]) => k !== 'sleep').map(([k, n]) => '<button class="chip' + (k === (swapSheet.cat || b.cat) ? ' on' : '') + '" data-act="swap-cat" data-id="' + b.id + '" data-v="' + k + '">' + n + '</button>').join('') + '</div><button class="btn primary" data-act="swap-rand" data-id="' + b.id + '">Surprise me</button>' +
-    (ALT[swapSheet.cat || b.cat] || []).map((a, i) => '<button class="opt" data-act="swap-pick" data-id="' + b.id + '" data-n="' + i + '"><b>' + esc(a[0]) + '</b><span>' + esc(a[1]) + '</span></button>').join('') + '<button class="btn" data-act="close-sheet">Keep as is</button>');
+const sheetB = () => findBlock(ui.sheetBlock);
+function adjustSheet() {
+  const isToday = viewKey() === logicalNow().key;
+  openSheet('<h2>Adjust ' + (isToday ? 'today' : 'this day') + '</h2><p class="small muted">Not every day runs the same. These change only this day, and each one can be undone.</p>' +
+    (isToday ? '<button class="opt strong" data-act="adj-now"><b>Start from now</b><span>Woke up late or lost a few hours? Pick what you are starting with. It begins now and the rest follows in order. What no longer fits before wind-down is dropped.</span></button>' : '') +
+    '<div class="field col"><span>Move ' + (isToday ? 'what is left' : 'the whole day') + '</span><div class="chips-scroll">' + [[-30, '30 min earlier'], [-15, '15 min earlier'], [15, '15 min later'], [30, '30 min later'], [60, '1 hour later']].map(x => '<button class="chip" data-act="adj-shift" data-n="' + x[0] + '">' + x[1] + '</button>').join('') + '</div></div>' +
+    '<div class="field col"><span>Rebuild as a different kind of day</span><div class="chips-scroll">' + Object.entries(DAY_TYPES).map(([k, t]) => '<button class="chip" data-act="adj-type" data-v="' + k + '">' + t.name + '</button>').join('') + '</div></div>' +
+    '<label class="f">I woke up at<input type="time" id="adjWake" data-adj="wake" value="' + state.settings.wake + '"></label><p class="small muted">Pick a time and the day is rebuilt from there.</p>' +
+    '<div class="row"><button class="btn sm" data-act="day-menu">Calendar and share</button><button class="btn sm" data-act="go" data-v="plan">Change my usual plan</button></div><button class="btn primary" data-act="close-sheet">Done</button>');
 }
 function calSheet(b) {
   const key = viewKey(), r = calSheet.recur || 'once';
@@ -439,29 +486,41 @@ function waveSheet(step) {
 // ---------- actions ----------
 const A = {
   'close-sheet': () => closeSheet(),
-  open: (el) => { ui.open = ui.open === el.dataset.id ? null : el.dataset.id; render(); },
+  open: (el) => blockSheet(findBlock(el.dataset.id), true),
+  adjust: () => adjustSheet(),
+  'bs-start': (el) => { const b = sheetB(), d = getDay(viewKey()); ripple(d, b, +el.dataset.n, true); save(); render(); blockSheet(b); },
+  'bs-dur': (el) => { const b = sheetB(), d = getDay(viewKey()), n = +el.dataset.n; ripple(d, b, n - b.dur, false); b.dur = n; save(); render(); blockSheet(b); },
+  'bs-idea': (el) => { const b = sheetB(), a = blockSheet.ideas[+el.dataset.n]; if (!a) return; b.title = a[0]; b.note = a[1]; save(); render(); blockSheet(b, true); buzz(8); },
+  'bs-more': () => blockSheet(sheetB(), true),
+  'bs-move': (el) => { const b = sheetB(), d = getDay(viewKey()), from = d.blocks.filter(x => !isFixed(x)).map(x => x.id), to = from.slice(), i = to.indexOf(b.id), j = i + +el.dataset.n; if (j < 0 || j >= to.length) { toast(j < 0 ? 'Already first' : 'Already last'); return; } to[i] = to[j]; to[j] = b.id; applyOrder(d, from, to); save(); render(); blockSheet(b); buzz(6); },
+  'adj-now': () => { const d = getDay(viewKey()), windStart = span().b - 120, now = logicalNow(), opts = d.blocks.filter(x => !x.done && !isFixed(x) && x.start < windStart);
+    if (!opts.length) { closeSheet(); toast('Nothing left to move.'); return; }
+    const guess = opts.find(x => x.start + x.dur > now.min) || opts[opts.length - 1];
+    openSheet('<h2>What are you starting with?</h2><p class="small muted">It begins now and everything after it follows. Anything before it is left as it was.</p>' + opts.map(x => '<button class="opt' + (x === guess ? ' strong' : '') + '" data-act="adj-from" data-id="' + x.id + '"><b>' + esc(x.title) + '</b><span>was ' + fmt(x.start) + ' · ' + dur(x.dur) + '</span></button>').join('') + '<button class="btn quiet" data-act="close-sheet">Cancel</button>');
+    const g = $('#sheetBody .opt.strong'); if (g) g.scrollIntoView({ block: 'center' }); },
+  'adj-from': (el) => { closeSheet(); startFromNow(el.dataset.id); },
+  'adj-shift': (el) => { const d = getDay(viewKey()), now = logicalNow(), n = +el.dataset.n, isToday = viewKey() === now.key; snap(); d.blocks.forEach(x => { if (!isFixed(x) && !x.done && (!isToday || x.start + x.dur > now.min)) x.start += n; }); sortDay(d); save(); closeSheet(); render(); toastUndo('Moved ' + Math.abs(n) + ' min ' + (n > 0 ? 'later' : 'earlier') + '.'); },
+  'adj-type': (el) => { const d = getDay(viewKey()); snap(); d.blocks = buildDay(el.dataset.v); save(); closeSheet(); render(); toastUndo('Rebuilt as a ' + DAY_TYPES[el.dataset.v].name.toLowerCase() + ' day.'); },
+  hand: () => { const t = $('#jText'); if (t) setDraft(t.value); state.settings.hand = state.settings.hand === false; save(); render(); },
   done: (el) => { const b = findBlock(el.dataset.id); b.done = !b.done;
     if (b.done) { buzz(14); if (viewKey() === logicalNow().key) { if (['move', 'write', 'people'].includes(b.cat)) setAnchor(b.cat, true); if (b.cat === 'sleep') setAnchor('sleep', true); }
       const d = getDay(viewKey()); toast(d.blocks.every(x => x.done) ? 'Whole day done. Rest well.' : pick(CHEERS)); }
     save(); render(); },
   anchor: (el) => { const d = getDay(logicalNow().key); d.anchors[el.dataset.id] = !d.anchors[el.dataset.id]; if (d.anchors[el.dataset.id]) buzz(14); save(); render(); },
-  go: (el) => { ui.tab = el.dataset.v; ui.open = null; render(); window.scrollTo(0, 0); },
+  go: (el) => { closeSheet(); ui.tab = el.dataset.v; ui.open = null; render(); window.scrollTo(0, 0); },
   'show-past': () => { ui.showPast = !ui.showPast; render(); },
   install: async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; render(); },
   'lock-off': () => { state.settings.lock = null; save(); render(); toast('PIN removed'); },
-  earlier: (el) => { const b = findBlock(el.dataset.id); b.start -= 15; sortDay(getDay(viewKey())); save(); render(); },
-  later: (el) => { const b = findBlock(el.dataset.id); b.start += 15; sortDay(getDay(viewKey())); save(); render(); },
-  del: (el) => { const d = getDay(viewKey()); const i = d.blocks.findIndex(x => x.id === el.dataset.id); const [gone] = d.blocks.splice(i, 1); save(); render(); A.undo = () => { d.blocks.push(gone); sortDay(d); save(); render(); }; const t = $('#toast'); t.innerHTML = 'Removed. <button class="btn sm" data-act="undo">Undo</button>'; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 5000); },
-  edit: (el) => editSheet(findBlock(el.dataset.id)),
-  'add-block': () => editSheet(null),
-  swap: (el) => { swapSheet.cat = null; swapSheet(findBlock(el.dataset.id)); },
-  'swap-cat': (el) => { swapSheet.cat = el.dataset.v; swapSheet(findBlock(el.dataset.id)); },
-  'swap-pick': (el) => { const b = findBlock(el.dataset.id), cat = swapSheet.cat || b.cat, a = ALT[cat][+el.dataset.n]; b.cat = cat; b.title = a[0]; b.note = a[1]; save(); closeSheet(); render(); },
-  'swap-rand': (el) => { const b = findBlock(el.dataset.id), cat = swapSheet.cat || b.cat, a = pick(ALT[cat].filter(x => x[0] !== b.title)); b.cat = cat; b.title = a[0]; b.note = a[1]; save(); closeSheet(); render(); toast('Swapped to: ' + a[0]); },
+  del: (el) => { const d = getDay(viewKey()), b = findBlock(el.dataset.id); if (!b) return; snap(); d.blocks.splice(d.blocks.indexOf(b), 1); save(); closeSheet(); render(); toastUndo('Removed.'); },
+  'add-block': () => { const d = getDay(viewKey()), now = logicalNow(), isToday = viewKey() === now.key, mov = d.blocks.filter(x => !isFixed(x)); snap();
+    const start = isToday ? Math.max(Math.ceil(now.min / 15) * 15, mov.length ? mov[0].start : span().w) : (mov[2] ? mov[2].start + mov[2].dur : span().w);
+    d.blocks.forEach(x => { if (!isFixed(x) && x.start >= start) x.start += 30; });
+    const b = { id: uid(), start, dur: 30, cat: 'fun', title: 'New block', note: '', done: false }; d.blocks.push(b); sortDay(d); save(); render(); blockSheet(b, true);
+    const t = $('#bsTitle'); t.focus(); t.select(); },
   cal: (el) => { calSheet.recur = 'once'; calSheet(findBlock(el.dataset.id)); },
   'day-menu': () => { calSheet.recur = 'once'; calSheet(null); },
   'cal-recur': (el) => { calSheet.recur = el.dataset.v; calSheet(el.dataset.id ? findBlock(el.dataset.id) : null); },
-  'cal-ics': (el) => { const key = viewKey(), b = el.dataset.id && findBlock(el.dataset.id); download(b ? 'tide-block.ics' : 'tide-' + key + '.ics', ics(key, b ? [b] : getDay(key).blocks, calSheet.recur || 'once'), 'text/calendar'); toast('Open the downloaded file to add it'); },
+  'cal-ics': (el) => { const key = viewKey(), b = el.dataset.id && findBlock(el.dataset.id); download(b ? 'ebb-block.ics' : 'ebb-' + key + '.ics', ics(key, b ? [b] : getDay(key).blocks, calSheet.recur || 'once'), 'text/calendar'); toast('Open the downloaded file to add it'); },
   'copy-plan': () => copy(planText(viewKey()), 'Plan copied'),
   'share-plan': () => { if (NATIVE) NATIVE.share(planText(viewKey())); else navigator.share({ title: 'My plan', text: planText(viewKey()) }).catch(() => {}); },
   'native-cal': (el) => { const b = findBlock(el.dataset.id), m0 = keyDate(viewKey()).getTime(); NATIVE.addEvent(b.title, b.note || '', m0 + b.start * 60000, m0 + (b.start + Math.max(b.dur, 10)) * 60000); closeSheet(); },
@@ -498,13 +557,13 @@ const A = {
   'nc-check': (el) => { getDay(logicalNow().key).nc[el.dataset.id] = el.checked; save(); },
   'quote-del': (el) => { state.quotes = state.quotes.filter(x => x.id !== el.dataset.id); save(); render(); },
   theme: (el) => { state.settings.theme = el.dataset.v; save(); render(); },
-  export: () => download('tide-backup-' + dateKey(new Date()) + '.json', JSON.stringify(state, null, 1), 'application/json'),
+  export: () => download('ebb-backup-' + dateKey(new Date()) + '.json', JSON.stringify(state, null, 1), 'application/json'),
   'sync-save': async () => { sync.token = $('#syncToken').value.trim(); if (!sync.token) { toast('Paste a token first'); return; } saveSync(); await syncNow(false); },
   'sync-off': () => { sync = { token: '', gistId: '', last: 0, status: '' }; saveSync(); render(); toast('Sync is off on this device'); },
   'g-connect': async () => { const v = $('#gClient').value.trim(); if (!/\.apps\.googleusercontent\.com$/.test(v)) { toast('That does not look like a client ID'); return; } state.g.clientId = v; save(true); await gSync(true); },
   'g-sync': () => gSync(true),
   'g-off': () => { G.token = ''; G.exp = 0; G.status = ''; try { sessionStorage.removeItem('tide.g'); } catch (e) { /* ignore */ } state.g.connected = false; save(true); render(); toast('Google disconnected'); },
-  undo: () => {}
+  undo: () => { if (!ui.undo) return; getDay(ui.undo.key).blocks = JSON.parse(ui.undo.blocks); ui.undo = null; save(); render(); $('#toast').hidden = true; },
 };
 
 document.addEventListener('click', e => {
@@ -516,12 +575,16 @@ document.addEventListener('change', e => {
   const el = e.target;
   if (el.dataset.act && el.tagName === 'INPUT' && A[el.dataset.act]) return A[el.dataset.act](el);
   if (el.dataset.set) { const k = el.dataset.set; if (k.startsWith('inc.')) state.settings.inc[k.slice(4)] = el.checked; else if (el.value) state.settings[k] = el.value; save(); render(); return; }
+  if (el.dataset.bs) { const b = sheetB(); if (!b) return; const k = el.dataset.bs;
+    if (k === 'title') b.title = el.value.trim() || b.title; else if (k === 'note') b.note = el.value.trim(); else if (k === 'cat' && CATS[el.value]) { b.cat = el.value; save(); render(); blockSheet(b, true); return; }
+    save(); render(); return; }
+  if (el.dataset.adj === 'wake' && el.value) { const d = getDay(viewKey()); snap(); d.blocks = buildDay(null, toMin(el.value)); save(); closeSheet(); render(); toastUndo('Day rebuilt from ' + fmt(toMin(el.value)) + '.'); return; }
   if (el.dataset.anchor) { const a = state.settings.anchors[+el.dataset.anchor]; if (a && el.value.trim()) { a.label = el.value.trim().slice(0, 40); save(); } return; }
   if (el.dataset.log) { const v = Math.max(0, +el.value || 0); getDay(logicalNow().key).log[el.dataset.log] = v; if (el.dataset.log === 'steps' && v >= (state.settings.stepGoal || 8000)) toast('Step goal reached'); save(); render(); return; }
   if (el.dataset.note) { state.notes[el.dataset.note] = el.value; ui.libOpen = el.dataset.note; save(); return; }
-  if (el.id === 'importFile' && el.files[0]) { const fr = new FileReader(); fr.onload = () => { try { const s = JSON.parse(fr.result); if (!s || !s.settings || !s.days) throw 0; state = migrate(s); save(); render(); toast('Restored'); } catch (err) { toast('That file is not a Tide backup'); } }; fr.readAsText(el.files[0]); }
+  if (el.id === 'importFile' && el.files[0]) { const fr = new FileReader(); fr.onload = () => { try { const s = JSON.parse(fr.result); if (!s || !s.settings || !s.days) throw 0; state = migrate(s); save(); render(); toast('Restored'); } catch (err) { toast('That file is not a Ebb backup'); } }; fr.readAsText(el.files[0]); }
 });
-document.addEventListener('input', e => { if (e.target.id === 'jText') setDraft(e.target.value); });
+document.addEventListener('input', e => { if (e.target.id === 'jText') { setDraft(e.target.value); growPaper(); } });
 document.addEventListener('toggle', e => { const d = e.target; if (d.dataset && d.dataset.lib && d.open) ui.libOpen = d.dataset.lib; }, true);
 document.addEventListener('submit', e => {
   e.preventDefault(); const f = e.target.dataset.form;
@@ -529,13 +592,6 @@ document.addEventListener('submit', e => {
   if (f === 'quote') { const v = $('#quoteIn').value.trim(); if (!v) return; state.quotes.push({ id: uid(), text: v, src: $('#quoteSrc').value.trim() }); save(); render(); }
   if (f === 'lock') { const pin = $('#pinNew').value; if (!/^\d{4,8}$/.test(pin)) { toast('Use 4 to 8 digits'); return; } const salt = uid() + uid(); pinHash(pin, salt).then(hash => { state.settings.lock = { salt, hash }; save(); render(); toast('PIN set'); }); }
   if (f === 'unlock') { const l = state.settings.lock; pinHash($('#pinIn').value, l.salt).then(h => { if (h === l.hash) { $('#lock').hidden = true; $('#pinIn').value = ''; } else { $('#pinIn').value = ''; $('#lockMsg').textContent = 'Wrong PIN. Try again.'; buzz([30, 40, 30]); } }); }
-  if (f === 'block') {
-    const d = getDay(viewKey()), { w } = span(); let start = toMin($('#bStart').value); if (start < w - 60) start += 1440;
-    const vals = { start, dur: Math.max(0, +$('#bDur').value || 0), cat: $('#bCat').value, title: $('#bTitle').value.trim() || 'Block', note: $('#bNote').value.trim() };
-    const b = e.target.dataset.id && d.blocks.find(x => x.id === e.target.dataset.id);
-    if (b) Object.assign(b, vals); else d.blocks.push(Object.assign({ id: uid(), done: false }, vals));
-    sortDay(d); save(); closeSheet(); render();
-  }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#sheet').hidden) closeSheet(); });
 
@@ -562,12 +618,7 @@ document.addEventListener('pointermove', e => { if (!drag) return; e.preventDefa
 function endDrag(commit) {
   if (!drag) return; clearInterval(drag.timer); document.body.classList.remove('dragging');
   const to = Array.from(drag.ul.querySelectorAll('.blk:not(.fixed)')).map(x => x.dataset.id), from = drag.from; drag = null;
-  if (commit && to.join() !== from.join()) {
-    const d = getDay(viewKey()), by = {}; d.blocks.forEach(b => { by[b.id] = b; });
-    let lo = 0, hi = to.length - 1; while (to[lo] === from[lo]) lo++; while (to[hi] === from[hi]) hi--;
-    let t = by[from[lo]].start; for (let i = lo; i <= hi; i++) { by[to[i]].start = t; t += by[to[i]].dur; }
-    sortDay(d); save(); toast('Moved. Times adjusted.');
-  }
+  if (commit && to.join() !== from.join()) { snap(); applyOrder(getDay(viewKey()), from, to); save(); render(); toastUndo('Moved. Times adjusted.'); return; }
   render();
 }
 document.addEventListener('pointerup', () => endDrag(true));
@@ -619,7 +670,7 @@ async function syncNow(quiet) {
     if (sync.gistId) { const g = await gh('/gists/' + sync.gistId); const f = g.files[GIST_FILE]; if (f) remote = JSON.parse(f.truncated ? await (await fetch(f.raw_url)).text() : f.content); }
     if (remote && (remote.updatedAt || 0) > state.updatedAt) { state = migrate(remote); persist(); if (idle()) render(); }
     else if (state.updatedAt && (!remote || state.updatedAt > (remote.updatedAt || 0))) {
-      const body = JSON.stringify({ description: 'Tide app data', public: false, files: { [GIST_FILE]: { content: JSON.stringify(state) } } });
+      const body = JSON.stringify({ description: 'Ebb app data', public: false, files: { [GIST_FILE]: { content: JSON.stringify(state) } } });
       if (sync.gistId) await gh('/gists/' + sync.gistId, { method: 'PATCH', body }); else sync.gistId = (await gh('/gists', { method: 'POST', body })).id;
     }
     sync.last = Date.now(); sync.status = ''; saveSync(); say('Last synced ' + new Date(sync.last).toLocaleString()); sync.status = ''; if (!quiet) toast('Synced');
@@ -666,7 +717,7 @@ async function gCalDay(key) {
   for (const e of Object.values(byId)) await gapi(base + '/' + e.id, { method: 'DELETE' });
 }
 async function gTasks() {
-  if (!state.g.listId) { const ls = (await gapi(TASKS + '/users/@me/lists?maxResults=100')).items || []; const f = ls.find(l => l.title === 'Tide'); state.g.listId = f ? f.id : (await gapi(TASKS + '/users/@me/lists', { method: 'POST', body: JSON.stringify({ title: 'Tide' }) })).id; }
+  if (!state.g.listId) { const ls = (await gapi(TASKS + '/users/@me/lists?maxResults=100')).items || []; const f = ls.find(l => l.title === 'Ebb'); state.g.listId = f ? f.id : (await gapi(TASKS + '/users/@me/lists', { method: 'POST', body: JSON.stringify({ title: 'Ebb' }) })).id; }
   const base = TASKS + '/lists/' + state.g.listId + '/tasks', today = logicalNow().key;
   for (const id of state.g.delTasks.splice(0)) await gapi(base + '/' + id, { method: 'DELETE' }).catch(() => {});
   let remote = [], page = '';
@@ -691,7 +742,7 @@ async function gSync(interactive) {
   try {
     say('Syncing with Google…'); await gAuth();
     const run = async () => {
-      if (!state.g.calId) state.g.calId = (await gapi(CAL + '/calendars', { method: 'POST', body: JSON.stringify({ summary: 'Tide', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }) })).id;
+      if (!state.g.calId) state.g.calId = (await gapi(CAL + '/calendars', { method: 'POST', body: JSON.stringify({ summary: 'Ebb', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }) })).id;
       const now = logicalNow().key; for (const k of Array.from(new Set([now, addDays(now, 1), viewKey()]))) await gCalDay(k);
       await gTasks();
     };

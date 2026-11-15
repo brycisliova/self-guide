@@ -1,12 +1,12 @@
 {
-  "name": "Tide",
-  "short_name": "Tide",
-  "description": "A daily rhythm you can reshape: schedule, tasks, journal, breathing and a calm kit.",
+  "name": "Ebb",
+  "short_name": "Ebb",
+  "description": "A calm daily rhythm you can reshape: schedule, notebook, breathing and a wave kit.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#091012",
-  "theme_color": "#091012",
+  "background_color": "#0b2b31",
+  "theme_color": "#0b2b31",
   "icons": [
     {
       "src": "icons/icon-192.png",

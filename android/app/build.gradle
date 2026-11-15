@@ -35,7 +35,7 @@ android {
 
 // The web app at the repository root is the app's screens; copy it in at build time.
 tasks.register('syncWeb', Copy) {
-    from('../..') { include 'index.html', 'styles.css', 'app.js', 'photos.js', 'img/**', 'icons/**' }
+    from('../..') { include 'index.html', 'styles.css', 'app.js', 'photos.js', 'img/**', 'icons/**', 'fonts/**' }
     into layout.buildDirectory.dir('webassets/web')
 }
 preBuild.dependsOn syncWeb

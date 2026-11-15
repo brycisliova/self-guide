@@ -31,8 +31,8 @@ final class Widgets {
         now.setOnClickPendingIntent(R.id.root, open(c, "", 1));
         now.setTextViewText(R.id.streak, n.streak > 0 ? "Day " + n.streak : "");
         if (n.key == null) {
-            now.setTextViewText(R.id.eyebrow, "Tide");
-            now.setTextViewText(R.id.title, "Open Tide");
+            now.setTextViewText(R.id.eyebrow, "Ebb");
+            now.setTextViewText(R.id.title, "Open Ebb");
             now.setTextViewText(R.id.next, "Tap to set up today.");
             now.setTextViewText(R.id.meta, steps > 0 ? nf.format(steps) + " steps" : "");
             now.setProgressBar(R.id.bar, 100, 0, false);
@@ -70,7 +70,7 @@ final class Widgets {
         boolean ok = Steps.hasSensor(c) && Steps.allowed(c);
         st.setTextViewText(R.id.steps, ok ? nf.format(steps) : "–");
         st.setProgressBar(R.id.bar, n.stepGoal, Math.min(steps, n.stepGoal), false);
-        st.setTextViewText(R.id.meta, !ok ? "Open Tide to allow" : "of " + nf.format(n.stepGoal) + (n.streak > 0 ? " · day " + n.streak : ""));
+        st.setTextViewText(R.id.meta, !ok ? "Open Ebb to allow" : "of " + nf.format(n.stepGoal) + (n.streak > 0 ? " · day " + n.streak : ""));
         m.updateAppWidget(new ComponentName(c, StepsWidget.class), st);
 
         RemoteViews wv = new RemoteViews(c.getPackageName(), R.layout.widget_wave);

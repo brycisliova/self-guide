@@ -1,4 +1,4 @@
-# Tide
+# Ebb
 
 A phone-first daily rhythm app. Plain HTML, CSS and JavaScript, no build step, works offline once installed.
 
@@ -19,7 +19,7 @@ A phone-first daily rhythm app. Plain HTML, CSS and JavaScript, no build step, w
 
 ## Google Calendar and Tasks
 
-Optional two-way link, set up in **More → Google Calendar and Tasks**. Tide keeps a calendar named Tide (today and tomorrow, an alert at each block) and a task list named Tide. Tasks sync both ways. Google requires your own OAuth client ID for this:
+Optional two-way link, set up in **More → Google Calendar and Tasks**. Ebb keeps a calendar named Ebb (today and tomorrow, an alert at each block) and a task list named Ebb. Tasks sync both ways. Google requires your own OAuth client ID for this:
 
 1. In [Google Cloud Console](https://console.cloud.google.com) create a project.
 2. Enable **Google Calendar API** and **Google Tasks API**.
@@ -53,11 +53,11 @@ Then open `http://localhost:8000`.
 - **Phone calendar**: add any block to the calendar app directly.
 
 Every push builds it and publishes the file at
-`https://github.com/<owner>/self-guide/releases/download/android-latest/Tide.apk`. Open that link on the phone, allow installs from the browser when asked, and install. Later builds install over earlier ones and keep your data.
+`https://github.com/<owner>/self-guide/releases/download/android-latest/Ebb.apk`. Open that link on the phone, allow installs from the browser when asked, and install. Later builds install over earlier ones and keep your data.
 
 Not in the Android app: the Google sign-in link (Google blocks sign-in inside embedded app screens) and reading Digital Wellbeing (Android does not allow it).
 
-The signing key (`android/tide.keystore`) is committed so that every build can update the last one. That makes the key public: anyone could sign a file that your phone would accept as an update to Tide. Only ever install `Tide.apk` from your own repository's release page.
+The signing key (`android/tide.keystore`) is committed so that every build can update the last one. That makes the key public: anyone could sign a file that your phone would accept as an update to Ebb. Only ever install `Ebb.apk` from your own repository's release page.
 
 Build locally with the Android SDK installed:
 
@@ -74,7 +74,7 @@ cd android && ./gradlew assembleRelease
 
 ## Limits of a web app
 
-- No home-screen widget of its own. With Google connected, the Google Calendar and Google Tasks widgets show the Tide day and tasks.
+- No home-screen widget of its own. With Google connected, the Google Calendar and Google Tasks widgets show the Ebb day and tasks.
 - No access to the phone's step counter or Digital Wellbeing. Steps, screen time and sleep are typed in on the Progress tab.
 
 ## Photographs

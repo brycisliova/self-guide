@@ -2,7 +2,7 @@ name: Android app
 
 on:
   push:
-    paths: ['android/**', 'index.html', 'styles.css', 'app.js', 'photos.js', 'img/**', 'icons/**', '.github/workflows/android.yml']
+    paths: ['android/**', 'index.html', 'styles.css', 'app.js', 'photos.js', 'img/**', 'icons/**', 'fonts/**', '.github/workflows/android.yml']
   workflow_dispatch:
 
 permissions:
@@ -28,9 +28,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk Tide.apk
+          cp android/app/build/outputs/apk/release/app-release.apk Ebb.apk
+          cp Ebb.apk Tide.apk
           gh release delete android-latest --yes --cleanup-tag || true
           sleep 3
-          gh release create android-latest Tide.apk --target "$GITHUB_SHA" \
-            --title "Tide for Android (build $GITHUB_RUN_NUMBER)" \
-            --notes "Open this page on your phone, download Tide.apk and install it. It updates over earlier builds and keeps your data."
+          gh release create android-latest Ebb.apk Tide.apk --target "$GITHUB_SHA" \
+            --title "Ebb for Android (build $GITHUB_RUN_NUMBER)" \
+            --notes "Open this page on your phone, download Ebb.apk and install it. It updates over earlier builds and keeps your data."
