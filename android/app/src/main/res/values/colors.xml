@@ -1,5 +1,4 @@
 <resources>
-    <color name="ink">#091012</color>
-    <color name="paper">#F4F6F3</color>
-    <color name="accent">#8FD3CF</color>
+    <color name="bg">#FBFCFB</color>
+    <color name="ink">#0F1413</color>
 </resources>

@@ -72,7 +72,7 @@ const CONSUME = {
 const KEY = 'tide.v1', SYNC_KEY = 'tide.sync';
 const blank = () => ({
   v: 1, updatedAt: 0,
-  settings: { hand: true, wake: '08:00', bed: '00:30', dayType: 'weekday', work: 3, inc: { move: true, nap: true, friends: true, journal: true, meditate: true, detox: true }, notify: false, theme: 'auto', stepGoal: 8000, lock: null,
+  settings: { hw: false, wake: '08:00', bed: '00:30', dayType: 'weekday', work: 3, inc: { move: true, nap: true, friends: true, journal: true, meditate: true, detox: true }, notify: false, theme: 'auto', stepGoal: 8000, lock: null,
     anchors: [{ id: 'move', label: 'Moved my body' }, { id: 'write', label: 'Wrote it out' }, { id: 'people', label: 'Time with a person' }, { id: 'sleep', label: 'Lights out on time' }] },
   template: null, days: {}, tasks: [], journal: [], waves: [], quotes: [], notes: {},
   nc: { start: null, best: 0, resets: 0 },
@@ -266,17 +266,16 @@ function tideSvg(key) {
 const dayNum = key => Math.round(keyDate(key).getTime() / 864e5);
 function photo(slot, key) { const list = PHOTOS[slot] || PHOTOS.dawn; return list[((dayNum(key || logicalNow().key) % list.length) + list.length) % list.length]; }
 function heroImg(key) { const now = logicalNow(); if (key !== now.key) return photo('dawn', key); const { b } = span(); return photo(now.min < 11 * 60 ? 'dawn' : now.min < 17 * 60 ? 'day' : now.min < b - 120 ? 'dusk' : 'night', key); }
-function hero(img, eyebrow, title, sub, extra, cls) {
-  return '<header class="hero ' + (cls || 'sub') + '" style="--img:url(img/' + img + '.webp)"><div class="hero-img"></div><div class="hero-top"><span class="mark">Ebb</span>' + (extra && extra.top || '') + '</div><div class="hero-main"><div class="eyebrow">' + eyebrow + '</div><h1>' + title + '</h1>' + (sub ? '<p>' + sub + '</p>' : '') + (extra && extra.act || '') + '</div>' + (extra && extra.bottom || '') + '</header>';
+function hero(img, name, title, sub, extra) {
+  return '<header class="bar"><div class="bar-row"><h1>' + name + '</h1>' + (extra && extra.top || '') + '</div>' + (sub ? '<div class="sub">' + sub + '</div>' : '') + '</header>';
 }
 function blockHtml(b, now, isToday) {
   const isNow = isToday && b.dur && now.min >= b.start && now.min < b.start + b.dur, fixed = isFixed(b);
   const past = isToday ? b.start + b.dur <= now.min && b.dur > 0 : false;
   return '<li class="blk cat-' + b.cat + (b.done ? ' done' : '') + (isNow ? ' now' : '') + (past ? ' past' : '') + (fixed ? ' fixed' : '') + '" data-id="' + b.id + '">' +
-    (fixed ? '<span class="grip none"></span>' : '<button class="grip" aria-label="Drag to move"><svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="4" r="1.5"/><circle cx="9" cy="4" r="1.5"/><circle cx="3" cy="10" r="1.5"/><circle cx="9" cy="10" r="1.5"/><circle cx="3" cy="16" r="1.5"/><circle cx="9" cy="16" r="1.5"/></g></svg></button>') +
-    '<div class="when">' + fmt(b.start) + '<span>' + (b.dur ? dur(b.dur) : '') + '</span></div>' +
-    '<button class="body" data-act="open" data-id="' + b.id + '"><div class="cat">' + CATS[b.cat] + (isNow ? ' · now' : '') + '</div><div class="ttl">' + esc(b.title) + '</div>' + (b.note && isNow ? '<div class="note">' + esc(b.note) + '</div>' : '') + '</button>' +
-    '<button class="chk" data-act="done" data-id="' + b.id + '" aria-label="' + (b.done ? 'Mark not done' : 'Mark done') + '"><i>' + (b.done ? '✓' : '') + '</i></button></li>';
+    '<button class="chk" data-act="done" data-id="' + b.id + '" aria-label="' + (b.done ? 'Mark not done' : 'Mark done') + '"><i>✓</i></button>' +
+    '<button class="body" data-act="open" data-id="' + b.id + '"><div class="ttl">' + esc(b.title) + '</div><div class="meta"><i></i>' + (isNow ? '<b>Now</b> · ' : '') + fmt(b.start) + (b.dur ? ' – ' + fmt(b.start + b.dur) : '') + ' · ' + CATS[b.cat] + '</div>' + (b.note && isNow ? '<div class="note">' + esc(b.note) + '</div>' : '') + '</button>' +
+    (fixed ? '<span class="grip none"></span>' : '<button class="grip" aria-label="Drag to move"><svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M3 7h14M3 13h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg></button>') + '</li>';
 }
 function anchorsHtml(d) {
   const n = streak();
@@ -301,12 +300,12 @@ function renderToday() {
   const shown = d.blocks.filter(x => !past.includes(x));
   const lastEnd = Math.max(0, ...d.blocks.filter(x => !isFixed(x)).map(x => x.start + x.dur)), over = lastEnd - bed;
   const rows = shown.map(x => (isFixed(x) && over > 0 ? '<li class="warn">This runs ' + dur(over) + ' past lights out. Shorten or remove something, or tap Adjust day.</li>' : '') + blockHtml(x, now, isToday)).join('');
-  return '<header class="hero top" style="--img:url(img/' + heroImg(key) + '.webp)"><div class="hero-img"></div><div class="hero-top"><span class="mark">Ebb</span><div class="daynav"><button data-act="day" data-n="-1" aria-label="Previous day">‹</button><button data-act="day" data-n="0" aria-label="Back to today">' + esc(short) + '</button><button data-act="day" data-n="1" aria-label="Next day">›</button></div></div>' +
-    '<div class="hero-main"><div class="eyebrow">' + eyebrow + '</div><h1>' + title + '</h1>' + act + '</div>' +
-    '<div class="hero-tide"><div class="meter light"><i style="width:' + (d.blocks.length ? doneN / d.blocks.length * 100 : 0) + '%"></i></div><div class="ends"><span>' + doneN + ' of ' + d.blocks.length + ' done</span><span>Lights out ' + fmt(bed) + '</span></div></div></header><!--b-->' + gl +
-    '<section class="stack day"><div class="row between"><h2>' + (isToday ? 'Today' : label) + '</h2><div class="row"><button class="btn sm" data-act="adjust">Adjust day</button><button class="btn sm" data-act="add-block">Add</button></div></div>' +
+  const chev = d2 => '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="' + d2 + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  return '<header class="bar"><div class="bar-row"><div><h1>' + (isToday ? 'Today' : label) + '</h1><div class="sub">' + esc(date) + '</div></div><div class="daynav">' + (ui.dayOffset ? '<button class="today" data-act="day" data-n="0">Today</button>' : '') + '<button data-act="day" data-n="-1" aria-label="Previous day">' + chev('M15 5l-7 7 7 7') + '</button><button data-act="day" data-n="1" aria-label="Next day">' + chev('M9 5l7 7-7 7') + '</button></div></div></header><!--b-->' +
+    (isToday ? '<section class="nowcard" style="--img:url(img/' + heroImg(key) + '.webp)"><div class="eyebrow">' + eyebrow + '</div><h2>' + title + '</h2>' + act + '<div class="meter light"><i style="width:' + (d.blocks.length ? doneN / d.blocks.length * 100 : 0) + '%"></i></div><div class="ends"><span>' + doneN + ' of ' + d.blocks.length + ' done</span><span>Lights out ' + fmt(bed) + '</span></div></section>' : '') + gl +
+    '<section class="stack day"><div class="row between"><h2>Schedule</h2><button class="btn sm" data-act="adjust">Adjust day</button></div>' +
     '<ul class="blocks">' + (past.length ? '<li class="earlier"><button data-act="show-past">Earlier: ' + past.length + ' blocks, ' + past.filter(x => x.done).length + ' done. Show</button></li>' : isToday && ui.showPast ? '<li class="earlier"><button data-act="show-past">Hide earlier blocks</button></li>' : '') + rows + '</ul>' +
-    '<p class="small muted hint">Tap a block to change it. Hold the dots and drag to move it.</p></section>' +
+    '<p class="small muted hint">Tap a block to change it. Drag the two lines to move it.</p></section><button class="fab" data-act="add-block" aria-label="Add a block">+</button>' +
     (isToday ? anchorsHtml(d) : '') +
     '<section class="stack"><div class="eyebrow">How is today, honestly?</div><div class="moods">' + ['Heavy', 'Low', 'Okay', 'Good', 'Light'].map((m, i) => '<button data-act="mood" data-n="' + (i + 1) + '" class="' + (d.mood === i + 1 ? 'on' : '') + '">' + m + '</button>').join('') + '</div></section>' +
     '<section class="card"><h2>Tasks</h2><form class="addrow" data-form="task"><input type="text" id="taskIn" placeholder="Add a task" autocomplete="off"><button class="btn primary">Add</button></form>' +
@@ -329,7 +328,8 @@ function renderProgress() {
   const avg = k => { const v = logs.map(l => +l[k]).filter(x => x > 0); return v.length ? v.reduce((a, c) => a + c, 0) / v.length : 0; };
   const goal = state.settings.stepGoal || 8000, lg = today.log;
   const anch = state.settings.anchors.filter(a => today.anchors[a.id]).length;
-  return hero(photo('progress'), 'Progress', n ? 'Day <em>' + n + '</em>' : 'Start <em>today</em>', n ? 'of showing up. One anchor keeps the streak. Miss a day, never two.' : 'Tick one anchor or finish three blocks and the count begins.') + '<!--b-->' +
+  return hero('', 'Progress') + '<!--b-->' + '<section class="streak"><div class="big">' + n + '</div><p>' + (n ? '<b>day' + (n === 1 ? '' : 's') + ' of showing up.</b><br>One anchor keeps the streak. Miss a day, never two.' : '<b>Start today.</b><br>Tick one anchor or finish three blocks and the count begins.') + '</p></section>' +
+    
     '<section class="card"><div class="stat"><div><b>' + today.blocks.filter(x => x.done).length + '<small>/' + today.blocks.length + '</small></b><span>blocks done today</span></div><div><b>' + anch + '<small>/' + state.settings.anchors.length + '</small></b><span>anchors today</span></div><div><b>' + Math.max(state.best || 0, n) + '</b><span>best streak, days</span></div></div></section>' +
     '<section class="card"><h2>Last four weeks</h2><div class="heat">' + cells + '</div><p class="small muted">Each square is a day. Darker means more of the plan done. A ring marks today. Blank days are just blank, not failures.</p></section>' +
     '<section class="card"><h2>Mood</h2>' + moodBars(14) + '<p class="small muted">Fourteen days, from the check on Today. Look at the direction, not single days.</p></section>' +
@@ -344,7 +344,7 @@ function renderProgress() {
 function renderPlan() {
   const s = state.settings;
   const tog = (k, label) => '<label class="tog"><input type="checkbox" data-set="inc.' + k + '"' + (s.inc[k] ? ' checked' : '') + '> ' + label + '</label>';
-  return hero(photo('plan'), 'Plan', 'Shape your <em>day</em>', 'Fix the two ends, wake and lights out. Everything between can move.', { top: '<div class="daynav"><button data-act="go" data-v="today">‹ Today</button></div>' }) + '<!--b-->' +
+  return hero('', 'Plan', '', 'Your usual day. For one-off changes use Adjust day.', { top: '<div class="daynav"><button class="today" data-act="go" data-v="today">Back</button></div>' }) + '<!--b-->' +
     '<section class="card"><h2>Sleep anchors</h2><div class="grid2"><label class="f">Wake<input type="time" id="setWake" data-set="wake" value="' + s.wake + '"></label><label class="f">Lights out<input type="time" id="setBed" data-set="bed" value="' + s.bed + '"></label></div>' +
     '<div class="row">' + ['00:00', '00:30', '01:00'].map(t => '<button class="chip' + (s.bed === t ? ' on' : '') + '" data-act="bed" data-v="' + t + '">' + fmt(toMin(t)) + '</button>').join('') + '</div><p class="small muted">Wind-down starts two hours before lights out, at ' + fmt(span().b - 120) + '. Feeds go off then.</p></section>' +
     '<section class="card"><h2>Day type</h2><div class="row">' + Object.entries(DAY_TYPES).map(([k, t]) => '<button class="chip' + (s.dayType === k ? ' on' : '') + '" data-act="daytype" data-v="' + k + '">' + t.name + '</button>').join('') + '</div><p class="small muted">' + DAY_TYPES[s.dayType].hint + '</p>' +
@@ -357,9 +357,9 @@ function renderPlan() {
 }
 
 function renderJournal() {
-  const p = PROMPTS[ui.prompt], hand = state.settings.hand !== false;
+  const p = PROMPTS[ui.prompt], hand = !!state.settings.hw;
   const stamp2 = ts => new Date(ts).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
-  return hero(photo('journal'), 'Journal', 'Write it <em>out</em>', 'On the page it stops circling.') + '<!--b-->' +
+  return hero('', 'Journal', '', 'On the page it stops circling.') + '<!--b-->' +
     '<section class="card"><div class="chips-scroll">' + PROMPTS.map((x, i) => '<button class="chip' + (ui.prompt === i ? ' on' : '') + '" data-act="prompt" data-n="' + i + '">' + x[0] + '</button>').join('') + '</div>' +
     '<div class="notebook' + (hand ? ' hand' : '') + '"><div class="nb-date">' + esc(stamp2(Date.now())) + '</div><textarea id="jText" class="paper" placeholder="Start anywhere." spellcheck="false">' + esc(draft() || p[1]) + '</textarea></div>' +
     '<div class="row between"><div class="row"><span class="small muted">Mood</span>' + [1, 2, 3, 4, 5].map(n => '<button class="chip dot' + (ui.jmood === n ? ' on' : '') + '" data-act="jmood" data-n="' + n + '">' + n + '</button>').join('') + '</div><button class="btn primary" data-act="jsave">Keep this page</button></div>' +
@@ -385,7 +385,7 @@ function tickUrge() { const el = $('#urge'); if (!el) return clearInterval(urgeT
 
 function renderCalm() {
   const weekAgo = Date.now() - 7 * 864e5;
-  return hero(photo('calm'), 'Calm', 'Back to the <em>body</em>', 'A wave peaks and passes in a few minutes if you do not feed it.') + '<!--b-->' +
+  return hero('', 'Calm', '', 'A wave peaks and passes if you do not feed it.') + '<!--b-->' +
     '<section class="card"><h2>Breathing pacer</h2><div class="row">' + Object.entries(PATTERNS).map(([k, p]) => '<button class="chip' + (ui.pattern === k ? ' on' : '') + '" data-act="pattern" data-v="' + k + '">' + p.name + '</button>').join('') + '</div><p class="small muted">' + PATTERNS[ui.pattern].hint + '</p>' + pacerHtml() + '</section>' +
     '<section class="card"><h2>Something calm to look at</h2><p class="small muted">Swipe sideways. Breathe out once per photo.</p></section><div class="gallery">' + Object.keys(PHOTO_META).map(k => '<figure><img loading="lazy" decoding="async" src="img/' + k + '.webp" alt="' + esc(PHOTO_META[k][0]) + '"><figcaption>' + esc(PHOTO_META[k][0]) + ' · ' + esc(PHOTO_META[k][1]) + '</figcaption></figure>').join('') + '</div>' +
     '<section class="card"><h2>Urge timer</h2><p class="small muted">Want to text, unblock, or check a profile? Start ten minutes and do one small task. Urges peak and fall on their own.</p><div class="timer" id="urge">10:00</div><div class="row"><button class="btn primary" data-act="urge">Start 10 minutes</button><button class="btn" data-act="urge-stop">Reset</button></div></section>' +
@@ -398,7 +398,7 @@ function renderCalm() {
 function ncDays() { return state.nc.start ? Math.floor((Date.now() - state.nc.start) / 864e5) : 0; }
 function renderMore() {
   const today = getDay(logicalNow().key), n = ncDays();
-  return hero(photo('more'), 'More', 'Tools and <em>notes</em>', '') + '<!--b-->' +
+  return hero('', 'More') + '<!--b-->' +
     '<section class="card"><h2>Shape your day</h2><p class="small muted">Wake and lights-out times, day type, focus blocks, anchors, reminders.</p><div class="row"><button class="btn primary" data-act="go" data-v="plan">Open Plan</button></div></section>' +
     (NATIVE ? '<section class="card"><h2>Widgets</h2><ul class="plain small"><li>Long-press an empty spot on your home screen → Widgets → Ebb.</li><li><b>Now and next</b> shows the current block with a Done button.</li><li><b>Steps and streak</b> shows today\'s steps against your goal.</li><li><b>Wave hit</b> is a one-tap shortcut to the calm steps.</li><li>On OnePlus, also allow Ebb to run in the background (Settings → Battery → Ebb → Allow background activity) so widgets and reminders stay current.</li></ul></section>' : '') +
     (NATIVE ? '' : '<section class="card"><h2>Android app</h2><p class="small muted">A native version with real home-screen widgets, automatic step counting and reminders that fire when the app is closed.</p><div class="row"><a class="btn primary" href="https://github.com/brycisliova/self-guide/releases/download/android-latest/Ebb.apk" rel="noopener">Download Ebb.apk</a></div><p class="small muted">It keeps its own data. Move yours across with Backup below: download here, restore there.</p></section>') +
@@ -501,7 +501,7 @@ const A = {
   'adj-from': (el) => { closeSheet(); startFromNow(el.dataset.id); },
   'adj-shift': (el) => { const d = getDay(viewKey()), now = logicalNow(), n = +el.dataset.n, isToday = viewKey() === now.key; snap(); d.blocks.forEach(x => { if (!isFixed(x) && !x.done && (!isToday || x.start + x.dur > now.min)) x.start += n; }); sortDay(d); save(); closeSheet(); render(); toastUndo('Moved ' + Math.abs(n) + ' min ' + (n > 0 ? 'later' : 'earlier') + '.'); },
   'adj-type': (el) => { const d = getDay(viewKey()); snap(); d.blocks = buildDay(el.dataset.v); save(); closeSheet(); render(); toastUndo('Rebuilt as a ' + DAY_TYPES[el.dataset.v].name.toLowerCase() + ' day.'); },
-  hand: () => { const t = $('#jText'); if (t) setDraft(t.value); state.settings.hand = state.settings.hand === false; save(); render(); },
+  hand: () => { const t = $('#jText'); if (t) setDraft(t.value); state.settings.hw = !state.settings.hw; save(); render(); },
   done: (el) => { const b = findBlock(el.dataset.id); b.done = !b.done;
     if (b.done) { buzz(14); if (viewKey() === logicalNow().key) { if (['move', 'write', 'people'].includes(b.cat)) setAnchor(b.cat, true); if (b.cat === 'sleep') setAnchor('sleep', true); }
       const d = getDay(viewKey()); toast(d.blocks.every(x => x.done) ? 'Whole day done. Rest well.' : pick(CHEERS)); }
@@ -538,7 +538,7 @@ const A = {
   notify: async (el) => { if (NATIVE) { state.settings.notify = el.checked; if (el.checked) NATIVE.askNotify(); save(); return; } if (el.checked) { if (!('Notification' in window)) { toast('This browser does not support notifications'); el.checked = false; return; } const p = await Notification.requestPermission(); if (p !== 'granted') { toast('Notifications are blocked in browser settings'); el.checked = false; return; } } state.settings.notify = el.checked; save(); },
   prompt: (el) => { ui.prompt = +el.dataset.n; setDraft(''); render(); },
   jmood: (el) => { const t = $('#jText'); if (t) setDraft(t.value); ui.jmood = ui.jmood === +el.dataset.n ? 0 : +el.dataset.n; render(); },
-  jsave: () => { const text = $('#jText').value.trim(); if (!text || text === PROMPTS[ui.prompt][1].trim()) { toast('Write something first'); return; } state.journal.push({ id: uid(), ts: Date.now(), prompt: PROMPTS[ui.prompt][0], text, mood: ui.jmood }); setAnchor('write', true); ui.jmood = 0; setDraft(''); save(); render(); toast('Saved'); },
+  jsave: () => { const text = $('#jText').value.trim(); if (!text || text === PROMPTS[ui.prompt][1].trim()) { toast('Write something first'); return; } state.journal.push({ id: uid(), ts: Date.now(), prompt: PROMPTS[ui.prompt][0], text, mood: ui.jmood }); setAnchor('write', true); ui.jmood = 0; setDraft(''); save(); render(); toast('Page kept'); },
   jdel: (el) => { state.journal = state.journal.filter(x => x.id !== el.dataset.id); save(); render(); },
   dictate: (el) => { const R = window.SpeechRecognition || window.webkitSpeechRecognition; const r = new R(); r.lang = navigator.language || 'en-IN'; r.onresult = e => { const t = $('#jText'); t.value = (t.value ? t.value + ' ' : '') + e.results[0][0].transcript; setDraft(t.value); }; r.onerror = () => toast('Could not hear that'); r.onend = () => { el.textContent = 'Dictate'; }; el.textContent = 'Listening…'; r.start(); },
   pattern: (el) => { ui.pattern = el.dataset.v; render(); },
